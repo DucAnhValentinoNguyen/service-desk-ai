@@ -15,7 +15,7 @@ canonical ticket + audit trail       RAG evidence + typed simulator reads
 proposal -> approval policy -> simulator write -> timeline
 ```
 
-The demo uses SQLite, a local object store, and an in-process retry runner. The contracts in `backend/app/ports.py` are the replacement seams for PostgreSQL/pgvector, S3, SQS/DLQ, and Cognito. No model response is treated as authorization to write to an external system.
+The demo uses SQLite, a local object store, and an in-process retry runner. The contracts in `backend/app/ports.py` are the replacement seams for PostgreSQL/pgvector, S3, SQS/DLQ, and Cognito. The provider adapter defaults to Kimi K3, supports OpenAI as an alternative, and can target any compatible self-hosted endpoint. No model response is treated as authorization to write to an external system.
 
 ## Trust boundaries
 

@@ -10,9 +10,17 @@ docker compose up --build
 
 Open http://localhost:3005. The API is available at http://localhost:8001/docs.
 
-The local profile uses SQLite and safe deterministic fallbacks so it works without API credentials. Set `OPENAI_API_KEY` in a local `.env` and keep `MODEL_PROVIDER=auto` to enable the AI router, RAG answer writer, and bounded specialist drafting. The model can classify and draft; trusted Python code validates its output, selects the only permitted tools, and keeps protected writes behind approval.
+The local profile uses SQLite and safe deterministic fallbacks so it works without API credentials. Kimi K3 is the default live provider: set `KIMI_API_KEY` in a local `.env` to enable the AI router, RAG answer writer, and bounded specialist drafting. OpenAI remains available with `MODEL_PROVIDER=openai` and `OPENAI_API_KEY`; `MODEL_PROVIDER=auto` prefers Kimi, then OpenAI, then the deterministic fallback. The model can classify and draft; trusted Python code validates its output, selects the only permitted tools, and keeps protected writes behind approval.
 
 Architecture and request examples are in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/API.md`](docs/API.md). A file-by-file technical map is in [`docs/REPOSITORY_MAP.md`](docs/REPOSITORY_MAP.md). Use [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md) for the walkthrough and [`docs/PRESENTATION.md`](docs/PRESENTATION.md) for the 10-minute presentation script.
+
+## RAG corpus and public sources
+
+The RAG implementation is in `backend/app/rag.py`. It chunks documents, applies workspace and sensitivity filters, ranks by token overlap, returns page/section citations, rejects prompt injection, abstains when evidence is insufficient, and passes approved evidence to the configured answer provider. The API routes are in `backend/app/main.py`, and the model adapter is in `backend/app/providers.py`.
+
+The reproducible demo corpus is in `backend/app/knowledge/`. These five Markdown files are synthetic service-desk policies, loaded by `Store._knowledge_documents()` in `backend/app/store.py` and persisted into the local SQLite `documents` and `chunks` tables on startup. They are not scraped copies of a vendor website.
+
+The official public site is useful as an optional production corpus: its [downloads page](https://www.enocean.com/en/support/downloads/) points to product datasheets and manuals, the [knowledge base](https://www.enocean.com/en/support/faq-knowledge-base/) lists protocol references, [application notes](https://www.enocean.com/en/support/application-notes/) cover radio, energy harvesting, sensors, and gateways, and the [building-automation page](https://www.enocean.com/en/applications/building-automation/) provides domain context. Before indexing vendor material in a public product, confirm permission, retain attribution, and store the source URL and document version. These fixtures keep the demo locally deterministic.
 
 ## Demo login
 
@@ -63,7 +71,7 @@ service-desk-ai/
 │       ├── schemas.py               Pydantic API and domain contracts
 │       ├── store.py                 SQLite schema, CRUD, seed data, tickets, approvals, and audit log
 │       ├── agents.py                AI front router plus bounded ERP, CRM, HR, and scheduling specialists
-│       ├── providers.py             Demo fallback and OpenAI-compatible structured-output adapter
+│       ├── providers.py             Demo fallback plus Kimi K3/OpenAI-compatible structured-output adapters
 │       ├── rag.py                   Chunking, retrieval, permissions, citations, abstention, and answer writing
 │       ├── adapters.py               Read-only and simulator tool boundaries for enterprise systems
 │       ├── guardrails.py             Injection/abuse checks, role gates, approval policy, and HR redaction
@@ -104,7 +112,9 @@ Folders created only by local development, such as `.git/`, `.venv/`, `data/`, `
 
 The flow is deliberately two-stage: the front router receives the request and chooses one supported specialist; that specialist can interpret approved evidence and draft a response or proposal for its one domain. Supply Chain, CRM, HR, and Scheduling each have separate prompts and allowlisted action types. The model never receives raw simulator records, never chooses arbitrary tools, and never executes a mutation. If the provider is unavailable, malformed, unsafe, low-confidence, or unsupported, the deterministic checks route the request to human review.
 
-To enable the model locally, create `.env` from `.env.example`, set `OPENAI_API_KEY`, and restart Compose. Never commit `.env` or paste the key into source control. The default `auto` mode uses OpenAI only when a key is present; otherwise the same safe deterministic demo path remains available.
+To enable Kimi K3 through the hosted Kimi API, create `.env` from `.env.example`, set `MODEL_PROVIDER=kimi` and `KIMI_API_KEY`, then restart Compose. Kimi's API is OpenAI-compatible and uses `https://api.moonshot.ai/v1` by default. To use OpenAI instead, set `MODEL_PROVIDER=openai` and `OPENAI_API_KEY`; `MODEL_PROVIDER=auto` prefers Kimi when configured. Without a live key, the deterministic demo path remains available.
+
+The Hugging Face `HF_TOKEN` is for downloading the open Kimi K3 weights when serving them yourself with vLLM or SGLang. It is not the credential for the hosted Kimi API. For a self-hosted endpoint, set `KIMI_BASE_URL` to that server's OpenAI-compatible `/v1` URL and set `KIMI_API_KEY` to the key expected by that server. The model card documents vLLM/SGLang serving and the Kimi API quickstart documents the hosted endpoint.
 
 ## Running tests on Windows
 

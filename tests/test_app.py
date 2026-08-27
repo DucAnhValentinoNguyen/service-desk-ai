@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from backend.app.store import Store
+from backend.app.providers import DemoProvider, KimiProvider, OpenAIProvider, get_provider
 
 
 def client(tmp_path: Path) -> TestClient:
@@ -18,6 +20,19 @@ def client(tmp_path: Path) -> TestClient:
     return TestClient(main.app)
 
 
+def test_provider_selection_supports_kimi_and_openai(monkeypatch) -> None:
+    import backend.app.providers as providers
+
+    monkeypatch.setattr(providers, "settings", replace(providers.settings, model_provider="kimi", kimi_api_key="kimi-test-key"))
+    assert isinstance(get_provider(), KimiProvider)
+
+    monkeypatch.setattr(providers, "settings", replace(providers.settings, model_provider="openai", openai_api_key="openai-test-key"))
+    assert isinstance(get_provider(), OpenAIProvider)
+
+    monkeypatch.setattr(providers, "settings", replace(providers.settings, model_provider="kimi", kimi_api_key=""))
+    assert isinstance(get_provider(), DemoProvider)
+
+
 def test_supply_chain_request_creates_approval_and_ticket(tmp_path: Path) -> None:
     with client(tmp_path) as http:
         response = http.post("/v1/requests", json={"content": "Inventory is below the reorder point and the supplier PO is late."})
@@ -27,6 +42,16 @@ def test_supply_chain_request_creates_approval_and_ticket(tmp_path: Path) -> Non
         assert body["status"] == "awaiting_approval"
         assert body["ticket"]["id"].startswith("TKT-")
         assert body["proposals"][0]["action_type"] == "create_purchase_order"
+
+
+def test_unified_intake_routes_policy_question_to_knowledge(tmp_path: Path) -> None:
+    with client(tmp_path) as http:
+        response = http.post("/v1/intake", json={"content": "What should an operator check when a purchase order is late?"})
+        assert response.status_code == 200
+        body = response.json()
+        assert body["kind"] == "knowledge"
+        assert body["knowledge"]["grounded"] is True
+        assert body["knowledge"]["citations"]
 
 
 def test_unknown_request_escalates_without_proposal(tmp_path: Path) -> None:

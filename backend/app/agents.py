@@ -11,6 +11,59 @@ from .store import Store
 
 
 AGENTS = {"supply_chain": "Supply Chain Specialist", "crm": "CRM Specialist", "hr": "HR Specialist", "appointment": "Scheduling Specialist"}
+KNOWLEDGE_OPENERS = (
+    "what",
+    "how",
+    "why",
+    "where",
+    "which",
+    "who",
+    "when",
+    "can you",
+    "could you",
+    "would you",
+    "do we",
+    "is there",
+)
+KNOWLEDGE_PHRASES = (
+    "what should",
+    "how should",
+    "how do",
+    "how can",
+    "where can i find",
+    "which policy",
+    "which procedure",
+    "explain",
+    "documentation",
+    "playbook",
+    "guidance",
+)
+REQUEST_MARKERS = (
+    "i need",
+    "please create",
+    "please open",
+    "please book",
+    "book me",
+    "schedule",
+    "customer reports",
+    "employee requests",
+    "open a ticket",
+    "create a ticket",
+    "submit",
+)
+
+
+def looks_like_knowledge_query(content: str) -> bool:
+    text = " ".join(content.lower().strip().split())
+    if not text:
+        return False
+    if any(marker in text for marker in REQUEST_MARKERS):
+        return False
+    if text.endswith("?"):
+        return True
+    if any(text.startswith(opener) for opener in KNOWLEDGE_OPENERS):
+        return True
+    return any(phrase in text for phrase in KNOWLEDGE_PHRASES)
 
 
 def classify(content: str) -> RequestClassification:

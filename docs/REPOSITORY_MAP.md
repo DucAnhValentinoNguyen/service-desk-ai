@@ -26,17 +26,26 @@ This document explains the responsibility of each maintained file in the reposit
 ## Backend Application
 
 - `backend/app/__init__.py`: Marks `backend/app/` as the importable application package.
-- `backend/app/config.py`: Central environment-backed settings object for database path, provider selection, OpenAI endpoint/model/timeout, and CORS origins.
+- `backend/app/config.py`: Central environment-backed settings object for database path, Kimi/OpenAI provider selection, endpoints/models, reasoning effort, timeout, and CORS origins.
 - `backend/app/main.py`: FastAPI entrypoint; defines login, database-backed identity context, server-side role/ownership authorization, approval execution, and request orchestration.
 - `backend/app/schemas.py`: Pydantic request and response contracts shared across the API, the RAG flow, calls, approvals, and ticket transitions.
 - `backend/app/store.py`: SQLite persistence layer; owns schema creation/migrations, demo identities and password hashes, request ownership, tickets, proposals, approvals, audit trails, documents, and appointments.
 - `backend/app/rag.py`: Local RAG implementation; handles document chunking, lightweight indexing, permission-aware retrieval, prompt-injection detection, citation shaping, and abstention behavior.
+- `backend/app/knowledge/`: Versioned Markdown demo corpus. Each file contains front matter for its database ID, access sensitivity, product area, allowed models, and optional source URL. The body is synthetic demo policy text.
 - `backend/app/agents.py`: Front-door AI router plus bounded specialist orchestration for supply chain, CRM, HR, and appointment flows; trusted code validates every model decision.
 - `backend/app/guardrails.py`: Central safety checks for abuse and prompt injection, approval gating, approver-role checks, and simple HR redaction.
 - `backend/app/adapters.py`: Contract-faithful simulator adapters for ERP, CRM, HRM, ticketing, and calendar tool surfaces.
 - `backend/app/ports.py`: Deployment seam definitions for object storage, queues, and identity, plus local development implementations.
-- `backend/app/providers.py`: Model-provider abstraction layer with a no-network demo fallback and structured-output OpenAI-compatible adapter for routing, grounded answers, and specialist drafts.
+- `backend/app/providers.py`: Model-provider abstraction layer with a no-network demo fallback and shared OpenAI-compatible adapters for Kimi K3 and OpenAI routing, grounded answers, and specialist drafts.
 - `backend/app/jobs.py`: Local durable job runner abstraction with retries and dead-letter status for future background workflows.
+
+## Knowledge Corpus
+
+- `backend/app/knowledge/supply-chain-policy.md`: Synthetic ERP inventory and late purchase-order policy, with a public building-automation context link.
+- `backend/app/knowledge/room-sensor-support.md`: Synthetic CRM troubleshooting playbook for missing room-sensor readings, with an optional public product-page link.
+- `backend/app/knowledge/employee-leave-policy.md`: Restricted synthetic HR leave policy.
+- `backend/app/knowledge/technician-appointment-policy.md`: Synthetic calendar booking policy, with an optional public application-notes link.
+- `backend/app/knowledge/escalation-policy.md`: Public synthetic policy describing when to abstain or escalate.
 
 ## Frontend
 

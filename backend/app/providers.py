@@ -31,24 +31,29 @@ class DemoProvider:
 
 
 @dataclass
-class OpenAIProvider:
-    """OpenAI-compatible adapter using the standard library for a small image."""
+class OpenAICompatibleProvider:
+    """Small dependency-free adapter for OpenAI-compatible chat APIs."""
 
-    name: str = "openai"
+    name: str
+    api_key: str
+    base_url: str
+    model: str
+    reasoning_effort: str | None = None
 
     def _json(self, system: str, user: str) -> dict[str, Any] | None:
-        if not settings.openai_api_key:
+        if not self.api_key:
             return None
         body = json.dumps({
-            "model": settings.openai_model,
+            "model": self.model,
             "temperature": 0,
             "response_format": {"type": "json_object"},
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            **({"reasoning_effort": self.reasoning_effort} if self.reasoning_effort else {}),
         }).encode()
         request = urllib.request.Request(
-            f"{settings.openai_base_url.rstrip('/')}/chat/completions",
+            f"{self.base_url.rstrip('/')}/chat/completions",
             data=body,
-            headers={"Authorization": f"Bearer {settings.openai_api_key}", "Content-Type": "application/json"},
+            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
             method="POST",
         )
         try:
@@ -79,7 +84,31 @@ class OpenAIProvider:
         )
 
 
+@dataclass
+class OpenAIProvider(OpenAICompatibleProvider):
+    name: str = "openai"
+    api_key: str = settings.openai_api_key
+    base_url: str = settings.openai_base_url
+    model: str = settings.openai_model
+
+
+@dataclass
+class KimiProvider(OpenAICompatibleProvider):
+    """Kimi K3 hosted API adapter; Kimi exposes the OpenAI chat contract."""
+
+    name: str = "kimi"
+    api_key: str = settings.kimi_api_key
+    base_url: str = settings.kimi_base_url
+    model: str = settings.kimi_model
+    reasoning_effort: str | None = settings.kimi_reasoning_effort
+
+
 def get_provider() -> ModelProvider:
-    if settings.model_provider.lower() in {"openai", "auto"} and settings.openai_api_key:
-        return OpenAIProvider()
+    provider = settings.model_provider.lower()
+    if provider in {"kimi", "auto"} and settings.kimi_api_key:
+        return KimiProvider(api_key=settings.kimi_api_key, base_url=settings.kimi_base_url, model=settings.kimi_model, reasoning_effort=settings.kimi_reasoning_effort)
+    if provider == "openai" and settings.openai_api_key:
+        return OpenAIProvider(api_key=settings.openai_api_key, base_url=settings.openai_base_url, model=settings.openai_model)
+    if provider == "auto" and settings.openai_api_key:
+        return OpenAIProvider(api_key=settings.openai_api_key, base_url=settings.openai_base_url, model=settings.openai_model)
     return DemoProvider()

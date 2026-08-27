@@ -129,19 +129,39 @@ class Store:
                 ("john-customer", "demo-workspace", "John Carter", "john@example.com", "viewer", "self", "Customer", password),
             ]
             db.executemany("INSERT OR REPLACE INTO users (id, workspace_id, name, email, role, pii_scope, department, password_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", users)
-            documents = [
-                ("doc-supply-policy", "Supply Chain Reorder and Late PO Policy", "For gateway batteries, the reorder point is 20 units. A purchase order more than 48 hours late is a supplier-risk exception. Service desk staff may draft an expedite request, but changing a purchase order requires an operations manager approval.\n\nSection: Inventory exceptions\nOperators should check available stock, open purchase orders, and the promised delivery date before recommending an action.", "markdown", "internal"),
-                ("doc-crm-support", "Room Sensor Customer Support Playbook", "When a customer reports missing room-sensor readings, verify the device identifier, last-seen timestamp, signal quality, and installation power conditions. Create or link a CRM case and provide troubleshooting steps. Customer-facing messages require approval when they include compensation, cancellation, or a commitment.", "markdown", "internal"),
-                ("doc-hr-leave", "Employee Leave Policy", "Employees may request annual leave through the HR service desk. The manager approval and remaining balance must be checked before approval. The service desk may explain policy and draft a leave request, but it must not approve leave or expose another employee's balance.", "markdown", "restricted"),
-                ("doc-appointments", "Technician Appointment Policy", "Technician appointments are offered only from available calendar slots. The caller must confirm the selected time. A booking is idempotent and must not replace an existing appointment. If no suitable slot exists, offer alternatives or escalate to a human coordinator.", "markdown", "internal"),
-                ("doc-escalation", "Service Desk Escalation Policy", "Escalate requests when classification confidence is below 0.65, the request asks for an irreversible or protected change, identity is insufficient, the caller is abusive, or the knowledge base does not contain supporting evidence. Record the reason in the ticket timeline.", "markdown", "public"),
-            ]
-            for document_id, title, content, source_type, sensitivity in documents:
+            for document_id, title, content, source_type, sensitivity, metadata, source_url in self._knowledge_documents():
                 checksum = hashlib.sha256(content.encode()).hexdigest()
-                metadata = {"product_area": "erp" if "Supply" in title else "crm" if "CRM" in title or "Sensor" in title else "scheduling" if "Appointment" in title else "service-desk", "product_models": ["room-sensor"] if "Sensor" in title else ["all"]}
-                db.execute("INSERT OR IGNORE INTO documents (id, workspace_id, title, content, source_type, sensitivity, status, checksum, created_at, metadata_json, source_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (document_id, "demo-workspace", title, content, source_type, sensitivity, "ready", checksum, now(), json.dumps(metadata), None))
-                db.execute("UPDATE documents SET metadata_json = ? WHERE id = ? AND metadata_json = '{}'", (json.dumps(metadata), document_id))
+                existing = db.execute("SELECT checksum FROM documents WHERE id = ?", (document_id,)).fetchone()
+                if existing and existing["checksum"] != checksum:
+                    db.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
+                db.execute("INSERT OR IGNORE INTO documents (id, workspace_id, title, content, source_type, sensitivity, status, checksum, created_at, metadata_json, source_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (document_id, "demo-workspace", title, content, source_type, sensitivity, "ready", checksum, now(), json.dumps(metadata), source_url))
+                db.execute("UPDATE documents SET title = ?, content = ?, source_type = ?, sensitivity = ?, status = 'ready', checksum = ?, metadata_json = ?, source_url = ? WHERE id = ?", (title, content, source_type, sensitivity, checksum, json.dumps(metadata), source_url, document_id))
             db.commit()
+
+    def _knowledge_documents(self) -> list[tuple[str, str, str, str, str, dict[str, Any], str | None]]:
+        """Load the reproducible demo corpus from Markdown instead of inline strings."""
+        corpus = Path(__file__).with_name("knowledge")
+        documents = []
+        for path in sorted(corpus.glob("*.md")):
+            fields: dict[str, str] = {}
+            lines = path.read_text(encoding="utf-8").splitlines()
+            in_frontmatter = bool(lines and lines[0].strip() == "---")
+            body_start = 1 if in_frontmatter else 0
+            if in_frontmatter:
+                for index in range(1, len(lines)):
+                    line = lines[index].strip()
+                    if line == "---":
+                        body_start = index + 1
+                        break
+                    if ":" in line:
+                        key, value = line.split(":", 1)
+                        fields[key.strip()] = value.strip().strip('"')
+            content = "\n".join(lines[body_start:]).strip()
+            title = fields.get("title") or next((line[2:].strip() for line in lines[body_start:] if line.startswith("# ")), path.stem)
+            product_models = [item.strip() for item in fields.get("product_models", "all").split(",") if item.strip()]
+            metadata = {"product_area": fields.get("product_area", "service-desk"), "product_models": product_models, "corpus_file": str(path.relative_to(corpus))}
+            documents.append((fields.get("id", f"doc-{path.stem}"), title, content, "markdown", fields.get("sensitivity", "internal"), metadata, fields.get("source_url") or None))
+        return documents
 
     def user(self, user_id: str) -> dict[str, Any] | None:
         with self.connect() as db:

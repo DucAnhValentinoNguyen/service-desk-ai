@@ -12,9 +12,9 @@ Start with `docker compose up --build`, open `http://localhost:3005`, and sign i
 
 ## Demonstrate AI and RAG
 
-Use Inbox input with `What should an operator check when a purchase order is late?` and select **Ask knowledge**. The answer contains citations from the seeded SQLite corpus. The source records are created in `backend/app/store.py` in `Store.seed()` and chunked/retrieved by `backend/app/rag.py`.
+Use Inbox input with `What should an operator check when a purchase order is late?` and select **Send to AI**. The intake agent recognizes this as a knowledge question and returns a cited answer from the seeded SQLite corpus. The source records are created in `backend/app/store.py` and chunked/retrieved by `backend/app/rag.py`.
 
-Then use `Customer reports that her room sensor stopped sending temperature readings.` and select **Submit request**. Select the new request in the work queue. The details panel shows the intake route, RAG-grounded response, citations, ticket ID, and proposed customer response.
+Then use `Customer reports that her room sensor stopped sending temperature readings.` and select **Send to AI** again. This time the intake agent recognizes an operational request, creates the tracked ticket, routes it to the CRM specialist, and shows the grounded response plus the proposed customer action.
 
 ## Demonstrate approval and outcome
 

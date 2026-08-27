@@ -8,10 +8,14 @@ services:
     environment:
       DATABASE_PATH: /app/data/service-desk.db
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3005,http://127.0.0.1:3005}
-      MODEL_PROVIDER: ${MODEL_PROVIDER:-auto}
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-kimi}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      KIMI_API_KEY: ${KIMI_API_KEY:-}
+      KIMI_BASE_URL: ${KIMI_BASE_URL:-https://api.moonshot.ai/v1}
+      KIMI_MODEL: ${KIMI_MODEL:-kimi-k3}
+      KIMI_REASONING_EFFORT: ${KIMI_REASONING_EFFORT:-low}
       AI_TIMEOUT_SECONDS: ${AI_TIMEOUT_SECONDS:-20}
     volumes:
       - service_desk_data:/app/data

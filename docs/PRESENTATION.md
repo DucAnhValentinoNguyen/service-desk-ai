@@ -6,7 +6,7 @@ Operations teams receive customer issues, HR requests, supply-chain exceptions, 
 
 ## 1:00-2:30 - What the product does
 
-The user signs in, writes naturally in a single Inbox, and chooses either **Ask knowledge** or **Submit request**. The intake agent classifies the request, selects exactly one bounded specialist, retrieves approved policy evidence, creates a ticket, and proposes the next action. It supports ERP supply-chain exceptions, CRM device support, HR requests, and technician appointments.
+The user signs in, writes naturally in a single Inbox, and presses one **Send to AI** action. The intake agent decides whether the message is a knowledge question or an operational request, then selects exactly one safe path. For requests, it classifies the issue, selects one bounded specialist, retrieves approved policy evidence, creates a ticket, and proposes the next action. It supports ERP supply-chain exceptions, CRM device support, HR requests, and technician appointments.
 
 ## 2:30-4:00 - Safety and access
 
@@ -14,11 +14,11 @@ Show the login page. Explain the hierarchy: Duc-Anh is the IT administrator and 
 
 ## 4:00-5:30 - AI and RAG
 
-Sign in as Alex and ask: `What should an operator check when a purchase order is late?` Click **Ask knowledge**. Point out the cited answer. The RAG pipeline normalizes seeded documents, chunks them by paragraph/section, applies role-aware retrieval, rejects prompt injection, and returns a grounded answer or abstains. With `OPENAI_API_KEY` configured, OpenAI writes the route, grounded answer, and specialist draft; trusted Python validates every structured result.
+Sign in as Alex and ask: `What should an operator check when a purchase order is late?` Click **Send to AI**. Point out that the system treats this as a knowledge question and returns a cited answer. The RAG pipeline normalizes seeded documents, chunks them by paragraph and section, applies role-aware retrieval, rejects prompt injection, and returns a grounded answer or abstains. With `KIMI_API_KEY` configured, Kimi K3 writes the route, grounded answer, and specialist draft; trusted Python validates every structured result. OpenAI remains a provider option.
 
 ## 5:30-7:30 - End-to-end workflow
 
-Submit the room-sensor support request. Show that the CRM specialist is selected, a ticket is created, the customer response is drafted, and no message has been sent yet. Sign in as Duc-Anh, open Approvals, and inspect the proposal payload. Approve it. Explain that approval triggers the simulator write with an idempotency key, adds the audit event, marks the proposal executed, and resolves the ticket. Rejecting would create the same audit trail but make no external write.
+Send the room-sensor support request through the same Inbox button. Show that the CRM specialist is selected, a ticket is created, the customer response is drafted, and no message has been sent yet. Sign in as Duc-Anh, open Approvals, and inspect the proposal payload. Approve it. Explain that approval triggers the simulator write with an idempotency key, adds the audit event, marks the proposal executed, and resolves the ticket. Rejecting would create the same audit trail but make no external write.
 
 ## 7:30-8:45 - Guardrails
 
@@ -26,4 +26,4 @@ Submit a prompt-injection request. It reaches human review and cannot create any
 
 ## 8:45-10:00 - Technology and value
 
-The frontend is Next.js 14 with TypeScript; the backend is FastAPI with Pydantic contracts. Local persistence is SQLite in a Docker volume, shaped so it can move to PostgreSQL with pgvector. Docker Compose runs the whole application locally. The provider layer supports OpenAI and safe deterministic fallback. The deployment seams cover AWS Cognito, S3, SQS, ECS/Fargate, RDS, CloudWatch, and Secrets Manager. For a customer, this means faster handling without letting AI silently modify their ERP, CRM, or HR systems. The platform starts as a demonstrable, safe workflow and can replace each simulator with a production connector when ready.
+The frontend is Next.js 14 with TypeScript; the backend is FastAPI with Pydantic contracts. Local persistence is SQLite in a Docker volume, shaped so it can move to PostgreSQL with pgvector. Docker Compose runs the whole application locally. The provider layer supports Kimi K3, OpenAI, and a safe deterministic fallback. The deployment seams cover AWS Cognito, S3, SQS, ECS/Fargate, RDS, CloudWatch, and Secrets Manager. For a customer, this means faster handling without letting AI silently modify their ERP, CRM, or HR systems. The platform starts as a demonstrable, safe workflow and can replace each simulator with a production connector when ready.

@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from .agents import run_specialist
+from .agents import classify, looks_like_knowledge_query, run_specialist
 from .config import settings
 from .guardrails import can_approve, inspect_input, redact_hr, requires_approval
 from .rag import ensure_index, ingest_document, query
@@ -113,6 +113,44 @@ def create_human_escalation(question: str, actor: str, workspace: str, reason: s
     store.audit(workspace, actor, "knowledge.escalated", request["id"], "human_review", tool_name="rag")
     return {"request_id": request["id"], "ticket_id": ticket["id"]}
 
+
+def process_request(payload: ServiceRequestCreate, actor: str, workspace: str) -> dict[str, Any]:
+    safety = inspect_input(payload.content)
+    identity = store.user(actor) or {}
+    request = store.create_request({**payload.model_dump(), "workspace_id": workspace, "requester_id": actor, "requester_name": identity.get("name", actor), "requester_email": identity.get("email")})
+    store.audit(workspace, actor, "request.created", request["id"], "accepted" if safety["safe"] else "blocked", tool_name="intake-guardrail")
+    if not safety["safe"]:
+        store.update_request(request["id"], status="awaiting_human", rationale=f"Human review required: {', '.join(safety['reasons'])}", severity="high", confidence=0.0)
+        ticket = store.create_ticket(store.get_request(request["id"]) or request)
+        store.transition_ticket(ticket["id"], "pending")
+        return request_bundle(request["id"])
+    return apply_triage(request["id"], actor)
+
+
+def process_knowledge(
+    question: str,
+    actor: str,
+    workspace: str,
+    role: str,
+    answer_mode: str = "explain",
+    product_model: str | None = None,
+    firmware_version: str | None = None,
+) -> dict[str, Any]:
+    result = query(
+        store,
+        KnowledgeQuery(
+            question=question,
+            workspace_id=workspace,
+            role=role,
+            answer_mode=answer_mode,
+            product_model=product_model,
+            firmware_version=firmware_version,
+        ),
+    ).model_dump()
+    if not result["grounded"]:
+        result["escalation"] = create_human_escalation(question, actor, workspace, result.get("warning") or "Knowledge answer requires human review")
+    return result
+
 @app.get("/")
 def root() -> dict[str, str]:
     return {"service": "service-desk-ai", "docs": "/docs", "health": "/healthz"}
@@ -147,16 +185,18 @@ def create_request(payload: ServiceRequestCreate, x_demo_user: str | None = Head
     actor, workspace, role = actor_context(x_demo_user, x_workspace_id)
     if payload.workspace_id != workspace:
         raise HTTPException(status_code=403, detail="Workspace access denied")
-    safety = inspect_input(payload.content)
-    identity = store.user(actor) or {}
-    request = store.create_request({**payload.model_dump(), "workspace_id": workspace, "requester_id": actor, "requester_name": identity.get("name", actor), "requester_email": identity.get("email")})
-    store.audit(workspace, actor, "request.created", request["id"], "accepted" if safety["safe"] else "blocked", tool_name="intake-guardrail")
-    if not safety["safe"]:
-        store.update_request(request["id"], status="awaiting_human", rationale=f"Human review required: {', '.join(safety['reasons'])}", severity="high", confidence=0.0)
-        ticket = store.create_ticket(store.get_request(request["id"]) or request)
-        store.transition_ticket(ticket["id"], "pending")
-        return request_bundle(request["id"])
-    return apply_triage(request["id"], actor)
+    return process_request(payload, actor, workspace)
+
+
+@app.post("/v1/intake")
+def intake(payload: ServiceRequestCreate, x_demo_user: str | None = Header(default=None), x_workspace_id: str | None = Header(default=None)) -> dict[str, Any]:
+    actor, workspace, role = actor_context(x_demo_user, x_workspace_id)
+    if payload.workspace_id != workspace:
+        raise HTTPException(status_code=403, detail="Workspace access denied")
+    route = classify(payload.content).model_dump()
+    if looks_like_knowledge_query(payload.content):
+        return {"kind": "knowledge", "route": route, "knowledge": process_knowledge(payload.content, actor, workspace, role)}
+    return {"kind": "request", "route": route, "request": process_request(payload, actor, workspace)}
 
 
 @app.get("/v1/requests")
@@ -333,11 +373,7 @@ def knowledge_query(payload: KnowledgeQuery, x_demo_user: str | None = Header(de
     actor, workspace, role = actor_context(x_demo_user, x_workspace_id)
     if payload.workspace_id != workspace:
         raise HTTPException(status_code=403, detail="Workspace access denied")
-    payload.role = role
-    result = query(store, payload).model_dump()
-    if not result["grounded"]:
-        result["escalation"] = create_human_escalation(payload.question, actor, workspace, result.get("warning") or "Knowledge answer requires human review")
-    return result
+    return process_knowledge(payload.question, actor, workspace, role, payload.answer_mode, payload.product_model, payload.firmware_version)
 
 
 @app.post("/v1/knowledge/feedback")

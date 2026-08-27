@@ -2,6 +2,18 @@
 
 The interactive OpenAPI contract is available at `/docs`.
 
+## Unified AI intake
+
+```http
+POST /v1/intake
+X-Demo-User: alex-ops
+Content-Type: application/json
+
+{"content":"What should an operator check when a purchase order is late?","source":"web"}
+```
+
+The frontend uses this endpoint for the single Inbox action. The intake agent decides whether the message is a grounded knowledge question or an operational request that should create and triage a tracked ticket.
+
 ## Create and triage a request
 
 ```http
