@@ -123,3 +123,9 @@ This avoids the blocked `pytest.exe` launcher reported by Windows application-co
 ## Security
 
 No credentials belong in this repository. Use `.env` locally and a secrets manager in deployment. The GitHub token previously pasted in chat must be revoked and rotated before creating or updating a remote repository.
+
+## Technical support mode
+
+The Inbox knowledge endpoint supports `answer_mode` values `explain`, `troubleshoot`, `design`, and `find_documentation`. Requests may include minimized diagnostic context such as `product_model`, `firmware_version`, `gateway`, `last_seen`, and `signal_quality`; it is persisted with the request and passed to the specialist workflow without exposing unrelated simulator records to the model.
+
+When a product model is supplied, retrieval is strict: only documents tagged for that model are eligible. If no approved evidence remains, the API returns an abstention and automatically creates an `awaiting_human` request and pending ticket. This gives the support team the original question, the safe reason for escalation, and a traceable next step.

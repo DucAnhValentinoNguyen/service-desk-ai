@@ -44,6 +44,7 @@ class Store:
                     id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, content TEXT NOT NULL,
                     source TEXT NOT NULL, requester_name TEXT NOT NULL, requester_email TEXT,
                     requester_id TEXT NOT NULL DEFAULT 'demo-admin',
+                    diagnostics_json TEXT NOT NULL DEFAULT '{}',
                     status TEXT NOT NULL, category TEXT NOT NULL, severity TEXT NOT NULL,
                     confidence REAL NOT NULL, rationale TEXT NOT NULL, assigned_agent TEXT,
                     answer TEXT, citations_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
@@ -77,7 +78,8 @@ class Store:
                 CREATE TABLE IF NOT EXISTS documents (
                     id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, title TEXT NOT NULL,
                     content TEXT NOT NULL, source_type TEXT NOT NULL, sensitivity TEXT NOT NULL,
-                    status TEXT NOT NULL, checksum TEXT NOT NULL, created_at TEXT NOT NULL
+                    status TEXT NOT NULL, checksum TEXT NOT NULL, created_at TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL DEFAULT '{}', source_url TEXT
                 );
                 CREATE TABLE IF NOT EXISTS chunks (
                     id TEXT PRIMARY KEY, document_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
@@ -106,6 +108,13 @@ class Store:
             request_columns = {row["name"] for row in db.execute("PRAGMA table_info(requests)").fetchall()}
             if "requester_id" not in request_columns:
                 db.execute("ALTER TABLE requests ADD COLUMN requester_id TEXT NOT NULL DEFAULT 'demo-admin'")
+            if "diagnostics_json" not in request_columns:
+                db.execute("ALTER TABLE requests ADD COLUMN diagnostics_json TEXT NOT NULL DEFAULT '{}'")
+            document_columns = {row["name"] for row in db.execute("PRAGMA table_info(documents)").fetchall()}
+            if "metadata_json" not in document_columns:
+                db.execute("ALTER TABLE documents ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'")
+            if "source_url" not in document_columns:
+                db.execute("ALTER TABLE documents ADD COLUMN source_url TEXT")
             db.commit()
 
     def seed(self) -> None:
@@ -128,7 +137,9 @@ class Store:
             ]
             for document_id, title, content, source_type, sensitivity in documents:
                 checksum = hashlib.sha256(content.encode()).hexdigest()
-                db.execute("INSERT OR IGNORE INTO documents VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (document_id, "demo-workspace", title, content, source_type, sensitivity, "ready", checksum, now()))
+                metadata = {"product_area": "erp" if "Supply" in title else "crm" if "CRM" in title or "Sensor" in title else "scheduling" if "Appointment" in title else "service-desk", "product_models": ["room-sensor"] if "Sensor" in title else ["all"]}
+                db.execute("INSERT OR IGNORE INTO documents (id, workspace_id, title, content, source_type, sensitivity, status, checksum, created_at, metadata_json, source_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (document_id, "demo-workspace", title, content, source_type, sensitivity, "ready", checksum, now(), json.dumps(metadata), None))
+                db.execute("UPDATE documents SET metadata_json = ? WHERE id = ? AND metadata_json = '{}'", (json.dumps(metadata), document_id))
             db.commit()
 
     def user(self, user_id: str) -> dict[str, Any] | None:
@@ -154,7 +165,7 @@ class Store:
     def create_request(self, data: dict[str, Any]) -> dict[str, Any]:
         request_id, timestamp = f"req-{uuid.uuid4().hex[:10]}", now()
         with self.lock, self.connect() as db:
-            db.execute("INSERT INTO requests VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (request_id, data["workspace_id"], data["content"], data["source"], data["requester_name"], data.get("requester_email"), data["requester_id"], "received", "unknown", "medium", 0.0, "Not classified", None, None, "[]", timestamp, timestamp))
+            db.execute("INSERT INTO requests (id, workspace_id, content, source, requester_name, requester_email, requester_id, diagnostics_json, status, category, severity, confidence, rationale, assigned_agent, answer, citations_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (request_id, data["workspace_id"], data["content"], data["source"], data["requester_name"], data.get("requester_email"), data["requester_id"], json.dumps(data.get("diagnostics", {})), "received", "unknown", "medium", 0.0, "Not classified", None, None, "[]", timestamp, timestamp))
             db.commit()
         return self.get_request(request_id) or {}
 
@@ -175,6 +186,7 @@ class Store:
             row = self._row(db.execute("SELECT * FROM requests WHERE id = ?", (request_id,)).fetchone())
             if row:
                 row["citations"] = json.loads(row.pop("citations_json"))
+                row["diagnostics"] = json.loads(row.pop("diagnostics_json", "{}"))
             return row
 
     def list_requests(self, workspace_id: str, status: str | None = None, requester_id: str | None = None, categories: tuple[str, ...] | None = None) -> list[dict[str, Any]]:
@@ -193,6 +205,7 @@ class Store:
             rows = self._rows(db.execute(query, args).fetchall())
         for row in rows:
             row["citations"] = json.loads(row.pop("citations_json"))
+            row["diagnostics"] = json.loads(row.pop("diagnostics_json", "{}"))
         return rows
 
     def create_ticket(self, request: dict[str, Any]) -> dict[str, Any]:
@@ -299,16 +312,22 @@ class Store:
 
     def documents(self, workspace_id: str) -> list[dict[str, Any]]:
         with self.connect() as db:
-            return self._rows(db.execute("SELECT id, workspace_id, title, source_type, sensitivity, status, checksum, created_at FROM documents WHERE workspace_id = ? ORDER BY title", (workspace_id,)).fetchall())
+            rows = self._rows(db.execute("SELECT id, workspace_id, title, source_type, sensitivity, status, checksum, created_at, metadata_json, source_url FROM documents WHERE workspace_id = ? ORDER BY title", (workspace_id,)).fetchall())
+        for row in rows:
+            row["metadata"] = json.loads(row.pop("metadata_json", "{}"))
+        return rows
 
     def document(self, document_id: str) -> dict[str, Any] | None:
         with self.connect() as db:
-            return self._row(db.execute("SELECT * FROM documents WHERE id = ?", (document_id,)).fetchone())
+            row = self._row(db.execute("SELECT * FROM documents WHERE id = ?", (document_id,)).fetchone())
+            if row:
+                row["metadata"] = json.loads(row.pop("metadata_json", "{}"))
+            return row
 
     def add_document(self, data: dict[str, Any], checksum: str) -> dict[str, Any]:
         document_id = f"doc-{uuid.uuid4().hex[:10]}"
         with self.lock, self.connect() as db:
-            db.execute("INSERT INTO documents VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (document_id, data["workspace_id"], data["title"], data["content"], data["source_type"], data["sensitivity"], "uploaded", checksum, now()))
+            db.execute("INSERT INTO documents (id, workspace_id, title, content, source_type, sensitivity, status, checksum, created_at, metadata_json, source_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (document_id, data["workspace_id"], data["title"], data["content"], data["source_type"], data["sensitivity"], "uploaded", checksum, now(), json.dumps(data.get("metadata", {})), data.get("source_url")))
             db.commit()
         return self.document(document_id) or {}
 

@@ -68,6 +68,11 @@ def query(store: Store, request: KnowledgeQuery) -> KnowledgeAnswer:
         document = store.document(chunk["document_id"])
         if not document or not visible(document, request.role):
             continue
+        metadata = document.get("metadata", {})
+        requested_model = (request.product_model or "").lower()
+        models = [str(value).lower() for value in metadata.get("product_models", ["all"])]
+        if requested_model and requested_model not in models:
+            continue
         chunk_tokens = set(chunk["keywords"])
         overlap = question_tokens & chunk_tokens
         score = len(overlap) / max(len(question_tokens), 1)
@@ -78,7 +83,7 @@ def query(store: Store, request: KnowledgeQuery) -> KnowledgeAnswer:
     rejected = [{"chunk_id": chunk["id"], "title": document["title"], "score": round(score, 3), "reason": "ranked below top_k"} for score, chunk, document in candidates[request.top_k : request.top_k + 3]]
     if not selected or selected[0][0] < 0.16:
         return KnowledgeAnswer(answer="I do not have enough approved evidence in the service-desk knowledge base to answer that safely. I have routed this for human review.", grounded=False, confidence=0.0 if not selected else round(selected[0][0], 3), citations=[], rejected_candidates=rejected, warning="Insufficient evidence")
-    citations = [EvidenceCitation(document_id=document["id"], title=document["title"], page=chunk["page"], section=chunk["section"], chunk_id=chunk["id"], excerpt=chunk["content"], score=round(score, 3)) for score, chunk, document in selected]
+    citations = [EvidenceCitation(document_id=document["id"], title=document["title"], page=chunk["page"], section=chunk["section"], chunk_id=chunk["id"], excerpt=chunk["content"], score=round(score, 3), source_url=document.get("source_url")) for score, chunk, document in selected]
     evidence = " ".join(f"{citation.excerpt}" for citation in citations[:3])
-    answer = get_provider().grounded_answer(request.question, evidence)
+    answer = get_provider().grounded_answer(request.question, evidence, request.answer_mode)
     return KnowledgeAnswer(answer=answer, grounded=True, confidence=round(min(0.98, selected[0][0] + 0.35), 3), citations=citations, rejected_candidates=rejected)

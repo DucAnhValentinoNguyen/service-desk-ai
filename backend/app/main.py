@@ -103,6 +103,16 @@ def apply_triage(request_id: str, actor: str = "service-desk-ai") -> dict[str, A
     store.audit(request["workspace_id"], actor, "request.triaged", request_id, decision, tool_name=classification.get("assigned_agent"))
     return request_bundle(request_id)
 
+
+def create_human_escalation(question: str, actor: str, workspace: str, reason: str) -> dict[str, Any]:
+    identity = store.user(actor) or {}
+    request = store.create_request({"content": question, "source": "web", "requester_id": actor, "requester_name": identity.get("name", actor), "requester_email": identity.get("email"), "workspace_id": workspace})
+    store.update_request(request["id"], status="awaiting_human", rationale=reason, severity="medium", confidence=0.0)
+    ticket = store.create_ticket(store.get_request(request["id"]) or request)
+    store.transition_ticket(ticket["id"], "pending")
+    store.audit(workspace, actor, "knowledge.escalated", request["id"], "human_review", tool_name="rag")
+    return {"request_id": request["id"], "ticket_id": ticket["id"]}
+
 @app.get("/")
 def root() -> dict[str, str]:
     return {"service": "service-desk-ai", "docs": "/docs", "health": "/healthz"}
@@ -311,7 +321,7 @@ def ingest(document_id: str, x_demo_user: str | None = Header(default=None), x_w
 
 @app.get("/v1/knowledge/documents")
 def documents(x_demo_user: str | None = Header(default=None), x_workspace_id: str | None = Header(default=None)) -> list[dict[str, Any]]:
-    _, workspace, role = actor_context(x_demo_user, x_workspace_id)
+    actor, workspace, role = actor_context(x_demo_user, x_workspace_id)
     result = store.documents(workspace)
     if role == "viewer":
         return [item for item in result if item["sensitivity"] == "public"]
@@ -320,11 +330,14 @@ def documents(x_demo_user: str | None = Header(default=None), x_workspace_id: st
 
 @app.post("/v1/knowledge/query")
 def knowledge_query(payload: KnowledgeQuery, x_demo_user: str | None = Header(default=None), x_workspace_id: str | None = Header(default=None)) -> dict[str, Any]:
-    _, workspace, role = actor_context(x_demo_user, x_workspace_id)
+    actor, workspace, role = actor_context(x_demo_user, x_workspace_id)
     if payload.workspace_id != workspace:
         raise HTTPException(status_code=403, detail="Workspace access denied")
     payload.role = role
-    return query(store, payload).model_dump()
+    result = query(store, payload).model_dump()
+    if not result["grounded"]:
+        result["escalation"] = create_human_escalation(payload.question, actor, workspace, result.get("warning") or "Knowledge answer requires human review")
+    return result
 
 
 @app.post("/v1/knowledge/feedback")
@@ -368,7 +381,7 @@ def call_message(call_id: str, payload: CallMessage, x_demo_user: str | None = H
         store.update_call(call_id, status="awaiting_human", transcript=transcript + [{"speaker": "assistant", "text": response, "at": now()}])
         store.audit(workspace, actor, "call.escalated", call_id, "unsafe_input")
         return store.call(call_id) or {}
-    request = store.create_request({"content": payload.content, "source": "phone", "requester_name": call["caller_name"], "requester_email": call["caller_email"], "workspace_id": workspace})
+    request = store.create_request({"content": payload.content, "source": "phone", "requester_id": actor, "requester_name": call["caller_name"], "requester_email": call["caller_email"], "workspace_id": workspace})
     store.update_call(call_id, request_id=request["id"])
     triaged = apply_triage(request["id"], actor)
     answer = redact_hr(triaged.get("answer") or "I created a service request and routed it to the right specialist.", "member")

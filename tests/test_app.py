@@ -85,3 +85,13 @@ def test_rag_returns_citations_and_calendar_is_idempotent(tmp_path: Path) -> Non
         assert first.status_code == 200
         assert second.status_code == 200
         assert first.json()["id"] == second.json()["id"]
+
+
+def test_rag_filter_and_unsupported_question_create_human_ticket(tmp_path: Path) -> None:
+    with client(tmp_path) as http:
+        filtered = http.post("/v1/knowledge/query", json={"question": "What should I check for a room sensor?", "product_model": "unrelated-model"})
+        assert filtered.status_code == 200
+        assert filtered.json()["grounded"] is False
+        assert filtered.json()["escalation"]["ticket_id"].startswith("TKT-")
+        requests = http.get("/v1/requests").json()
+        assert any(item["status"] == "awaiting_human" for item in requests)

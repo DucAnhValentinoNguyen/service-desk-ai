@@ -20,10 +20,10 @@ The response contains the canonical ticket, classification, evidence citations, 
 POST /v1/knowledge/query
 Content-Type: application/json
 
-{"question":"What is the reorder point for gateway batteries?"}
+{"question":"How should I troubleshoot a room sensor?","answer_mode":"troubleshoot","product_model":"room-sensor","firmware_version":"2.4"}
 ```
 
-Grounded answers contain citations. Low-evidence and prompt-injection requests return an explicit safe refusal.
+Grounded answers contain citations, and can be requested in `explain`, `troubleshoot`, `design`, or `find_documentation` mode. `product_model` and `firmware_version` narrow retrieval context. Low-evidence and prompt-injection requests return an explicit safe refusal and create an `awaiting_human` request/ticket for follow-up.
 
 ## Approve a protected action
 

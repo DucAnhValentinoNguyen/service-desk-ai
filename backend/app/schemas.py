@@ -12,6 +12,7 @@ RequestStatus = Literal[
 ]
 TicketStatus = Literal["open", "in_progress", "pending", "resolved", "closed"]
 Role = Literal["owner", "admin", "member", "viewer"]
+AnswerMode = Literal["explain", "troubleshoot", "design", "find_documentation"]
 
 
 class WorkspaceContext(BaseModel):
@@ -31,6 +32,7 @@ class ServiceRequestCreate(BaseModel):
     requester_name: str = Field(default="Demo requester", max_length=120)
     requester_email: str | None = Field(default=None, max_length=240)
     workspace_id: str = "demo-workspace"
+    diagnostics: dict[str, str] = Field(default_factory=dict, max_length=10)
 
 
 class RequestClassification(BaseModel):
@@ -49,6 +51,7 @@ class EvidenceCitation(BaseModel):
     chunk_id: str
     excerpt: str
     score: float
+    source_url: str | None = None
 
 
 class KnowledgeQuery(BaseModel):
@@ -56,6 +59,9 @@ class KnowledgeQuery(BaseModel):
     workspace_id: str = "demo-workspace"
     role: Role = "member"
     top_k: int = Field(default=5, ge=1, le=10)
+    answer_mode: AnswerMode = "explain"
+    product_model: str | None = Field(default=None, max_length=120)
+    firmware_version: str | None = Field(default=None, max_length=80)
 
 
 class KnowledgeAnswer(BaseModel):
@@ -108,6 +114,8 @@ class DocumentCreate(BaseModel):
     source_type: Literal["markdown", "text", "html", "pdf"] = "markdown"
     workspace_id: str = "demo-workspace"
     sensitivity: Literal["public", "internal", "restricted"] = "internal"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    source_url: str | None = Field(default=None, max_length=1000)
 
 
 class EvaluationCreate(BaseModel):
