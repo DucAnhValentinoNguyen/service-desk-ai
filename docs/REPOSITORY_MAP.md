@@ -27,9 +27,9 @@ This document explains the responsibility of each maintained file in the reposit
 
 - `backend/app/__init__.py`: Marks `backend/app/` as the importable application package.
 - `backend/app/config.py`: Central environment-backed settings object for database path, provider selection, OpenAI endpoint/model/timeout, and CORS origins.
-- `backend/app/main.py`: FastAPI entrypoint; defines every public endpoint, startup seeding/indexing, demo auth context, approval execution, and request orchestration.
+- `backend/app/main.py`: FastAPI entrypoint; defines login, database-backed identity context, server-side role/ownership authorization, approval execution, and request orchestration.
 - `backend/app/schemas.py`: Pydantic request and response contracts shared across the API, the RAG flow, calls, approvals, and ticket transitions.
-- `backend/app/store.py`: SQLite persistence layer; owns schema creation, seeding, CRUD operations, audit trails, document chunks, calls, appointments, and simulator health state.
+- `backend/app/store.py`: SQLite persistence layer; owns schema creation/migrations, demo identities and password hashes, request ownership, tickets, proposals, approvals, audit trails, documents, and appointments.
 - `backend/app/rag.py`: Local RAG implementation; handles document chunking, lightweight indexing, permission-aware retrieval, prompt-injection detection, citation shaping, and abstention behavior.
 - `backend/app/agents.py`: Front-door AI router plus bounded specialist orchestration for supply chain, CRM, HR, and appointment flows; trusted code validates every model decision.
 - `backend/app/guardrails.py`: Central safety checks for abuse and prompt injection, approval gating, approver-role checks, and simple HR redaction.
@@ -48,7 +48,7 @@ This document explains the responsibility of each maintained file in the reposit
 - `frontend/tsconfig.json`: TypeScript compiler configuration for the app router frontend.
 - `frontend/next-env.d.ts`: Standard Next.js type shim that wires framework-generated types into TypeScript.
 - `frontend/app/layout.tsx`: Global HTML shell and page metadata for the frontend app router.
-- `frontend/app/page.tsx`: Main single-page demo console; renders inbox, knowledge desk, calls, approvals, and integration health, and performs all browser-side API requests.
+- `frontend/app/page.tsx`: Main single-page demo console; renders login, role-scoped Inbox, combined knowledge query, request detail, and owner-only approvals.
 - `frontend/app/globals.css`: Global design system and responsive styling for the dashboard UI.
 
 ## Infrastructure
@@ -65,6 +65,8 @@ This document explains the responsibility of each maintained file in the reposit
 
 - `docs/ARCHITECTURE.md`: High-level system architecture, trust boundaries, and demo walkthrough order.
 - `docs/API.md`: Example HTTP requests for the most important user journeys.
+- `docs/DEMO_GUIDE.md`: Repeatable role-by-role demo sequence and expected outcomes.
+- `docs/PRESENTATION.md`: Timed ten-minute presentation narrative.
 - `docs/REPOSITORY_MAP.md`: This file; a file-by-file responsibility guide for the repository.
 
 ## Repo-Level Package

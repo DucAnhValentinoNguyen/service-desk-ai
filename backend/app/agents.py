@@ -72,7 +72,8 @@ def run_specialist(store: Store, request: dict[str, Any]) -> dict[str, Any]:
         elif "leave" in text or "vacation" in text:
             result["proposal"] = {"action_type": "approve_leave", "risk": "high", "payload": {"employee_id": employee["employee_id"], "available_days": employee["balance_days"], "manager_approval_required": True}}
     elif classification.category == "appointment":
-        result["proposal"] = {"action_type": "book_appointment", "risk": "medium", "payload": {"requires_caller_confirmation": True}}
+        available = next((slot for slot in store.appointment_slots() if slot["available"]), None)
+        result["proposal"] = {"action_type": "book_appointment", "risk": "medium", "payload": {"requires_requester_confirmation": True, "suggested_slot": available["starts_at"] if available else None}}
     specialist = get_provider().specialist(classification.category, request["content"], evidence.answer)
     if specialist and isinstance(specialist.get("answer"), str):
         result["evidence"]["answer"] = specialist["answer"][:4000]

@@ -15,7 +15,7 @@ from .config import settings
 from .guardrails import can_approve, inspect_input, redact_hr, requires_approval
 from .rag import ensure_index, ingest_document, query
 from .schemas import (
-    ApprovalDecision, CallCreate, CallMessage, CommentCreate, DocumentCreate,
+    ApprovalDecision, CallCreate, CallMessage, CommentCreate, DocumentCreate, LoginRequest,
     EvaluationCreate, KnowledgeQuery, ProposalCreate, ScheduleRequest,
     ServiceRequestCreate, TransitionCreate,
 )
@@ -34,12 +34,36 @@ app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), al
 
 
 def actor_context(x_demo_user: str | None, x_workspace_id: str | None) -> tuple[str, str, str]:
-    user_id = x_demo_user or "demo-admin"
-    users = {"demo-owner": ("demo-workspace", "owner"), "demo-admin": ("demo-workspace", "admin"), "demo-member": ("demo-workspace", "member"), "demo-viewer": ("demo-workspace", "viewer")}
-    workspace, role = users.get(user_id, ("demo-workspace", "member"))
+    # Legacy ids keep existing API scripts working while the browser uses DB-backed users.
+    aliases = {"demo-owner": "duc-anh", "demo-admin": "alex-ops", "demo-member": "tim-staff", "demo-viewer": "john-customer"}
+    user_id = aliases.get(x_demo_user or "duc-anh", x_demo_user or "duc-anh")
+    user = store.user(user_id)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    workspace, role = user["workspace_id"], user["role"]
     if x_workspace_id and x_workspace_id != workspace:
         raise HTTPException(status_code=403, detail="Workspace access denied")
     return user_id, workspace, role
+
+
+def allowed_categories(user_id: str, role: str) -> tuple[str, ...] | None:
+    if role == "owner":
+        return None
+    if role != "admin":
+        return ()
+    department = (store.user(user_id) or {}).get("department")
+    return ("hr",) if department == "HR" else ("supply_chain", "crm", "appointment", "general", "unknown")
+
+
+def require_request_access(item: dict[str, Any], user_id: str, workspace: str, role: str) -> None:
+    if item["workspace_id"] != workspace:
+        raise HTTPException(status_code=404, detail="Request not found")
+    categories = allowed_categories(user_id, role)
+    if role == "owner" or item["requester_id"] == user_id:
+        return
+    if categories and item["category"] in categories:
+        return
+    raise HTTPException(status_code=404, detail="Request not found")
 
 
 def request_bundle(request_id: str) -> dict[str, Any]:
@@ -89,10 +113,23 @@ def health() -> dict[str, Any]:
     return {"status": "ok", "provider": settings.model_provider, "storage": "sqlite-local", "version": app.version}
 
 
+@app.post("/v1/auth/login")
+def login(payload: LoginRequest) -> dict[str, Any]:
+    user = store.authenticate(payload.email, payload.password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    return user
+
+
+@app.get("/v1/auth/demo-users")
+def demo_users() -> list[dict[str, Any]]:
+    return store.users("demo-workspace")
+
+
 @app.get("/v1/me")
 def me(x_demo_user: str | None = Header(default=None), x_workspace_id: str | None = Header(default=None)) -> dict[str, str]:
     user, workspace, role = actor_context(x_demo_user, x_workspace_id)
-    return {"user_id": user, "workspace_id": workspace, "role": role}
+    return store.user(user) or {"user_id": user, "workspace_id": workspace, "role": role}
 
 
 @app.post("/v1/requests")
@@ -101,7 +138,8 @@ def create_request(payload: ServiceRequestCreate, x_demo_user: str | None = Head
     if payload.workspace_id != workspace:
         raise HTTPException(status_code=403, detail="Workspace access denied")
     safety = inspect_input(payload.content)
-    request = store.create_request(payload.model_dump())
+    identity = store.user(actor) or {}
+    request = store.create_request({**payload.model_dump(), "workspace_id": workspace, "requester_id": actor, "requester_name": identity.get("name", actor), "requester_email": identity.get("email")})
     store.audit(workspace, actor, "request.created", request["id"], "accepted" if safety["safe"] else "blocked", tool_name="intake-guardrail")
     if not safety["safe"]:
         store.update_request(request["id"], status="awaiting_human", rationale=f"Human review required: {', '.join(safety['reasons'])}", severity="high", confidence=0.0)
@@ -113,40 +151,52 @@ def create_request(payload: ServiceRequestCreate, x_demo_user: str | None = Head
 
 @app.get("/v1/requests")
 def list_requests(status: str | None = Query(default=None), x_demo_user: str | None = Header(default=None), x_workspace_id: str | None = Header(default=None)) -> list[dict[str, Any]]:
-    _, workspace, _ = actor_context(x_demo_user, x_workspace_id)
-    return store.list_requests(workspace, status)
+    actor, workspace, role = actor_context(x_demo_user, x_workspace_id)
+    if role in {"member", "viewer"}:
+        return store.list_requests(workspace, status, requester_id=actor)
+    visible = store.list_requests(workspace, status, categories=allowed_categories(actor, role))
+    if role == "admin":
+        own = store.list_requests(workspace, status, requester_id=actor)
+        return sorted({item["id"]: item for item in [*visible, *own]}.values(), key=lambda item: item["created_at"], reverse=True)
+    return visible
 
 
 @app.get("/v1/requests/{request_id}")
 def get_request(request_id: str, x_demo_user: str | None = Header(default=None), x_workspace_id: str | None = Header(default=None)) -> dict[str, Any]:
-    _, workspace, _ = actor_context(x_demo_user, x_workspace_id)
+    actor, workspace, role = actor_context(x_demo_user, x_workspace_id)
     item = request_bundle(request_id)
-    if item["workspace_id"] != workspace:
-        raise HTTPException(status_code=404, detail="Request not found")
+    require_request_access(item, actor, workspace, role)
     return item
 
 
 @app.post("/v1/requests/{request_id}/triage")
 def triage_request(request_id: str, x_demo_user: str | None = Header(default=None), x_workspace_id: str | None = Header(default=None)) -> dict[str, Any]:
-    actor, workspace, _ = actor_context(x_demo_user, x_workspace_id)
+    actor, workspace, role = actor_context(x_demo_user, x_workspace_id)
     item = store.get_request(request_id)
-    if not item or item["workspace_id"] != workspace:
+    if not item:
         raise HTTPException(status_code=404, detail="Request not found")
+    require_request_access(item, actor, workspace, role)
     return apply_triage(request_id, actor)
 
 
 @app.get("/v1/tickets")
 def list_tickets(status: str | None = Query(default=None), x_demo_user: str | None = Header(default=None), x_workspace_id: str | None = Header(default=None)) -> list[dict[str, Any]]:
-    _, workspace, _ = actor_context(x_demo_user, x_workspace_id)
-    return store.list_tickets(workspace, status)
+    actor, workspace, role = actor_context(x_demo_user, x_workspace_id)
+    requests = list_requests(status=None, x_demo_user=x_demo_user, x_workspace_id=x_workspace_id)
+    visible_ids = {item["id"] for item in requests}
+    return [item for item in store.list_tickets(workspace, status) if item["request_id"] in visible_ids]
 
 
 @app.get("/v1/tickets/{ticket_id}")
 def get_ticket(ticket_id: str, x_demo_user: str | None = Header(default=None), x_workspace_id: str | None = Header(default=None)) -> dict[str, Any]:
-    _, workspace, _ = actor_context(x_demo_user, x_workspace_id)
+    actor, workspace, role = actor_context(x_demo_user, x_workspace_id)
     ticket = store.get_ticket(ticket_id)
-    if not ticket or ticket["workspace_id"] != workspace:
+    if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
+    request = store.get_request(ticket["request_id"])
+    if not request:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    require_request_access(request, actor, workspace, role)
     return ticket
 
 
@@ -162,8 +212,8 @@ def add_comment(ticket_id: str, payload: CommentCreate, x_demo_user: str | None 
 @app.post("/v1/tickets/{ticket_id}/transition")
 def transition_ticket(ticket_id: str, payload: TransitionCreate, x_demo_user: str | None = Header(default=None), x_workspace_id: str | None = Header(default=None)) -> dict[str, Any]:
     actor, workspace, role = actor_context(x_demo_user, x_workspace_id)
-    if role == "viewer":
-        raise HTTPException(status_code=403, detail="Viewer cannot transition tickets")
+    if role in {"viewer", "member"}:
+        raise HTTPException(status_code=403, detail="Only IT and operational staff can transition tickets")
     get_ticket(ticket_id, x_demo_user, x_workspace_id)
     result = store.transition_ticket(ticket_id, payload.status)
     store.audit(workspace, actor, "ticket.transitioned", ticket_id, payload.status)
@@ -172,7 +222,9 @@ def transition_ticket(ticket_id: str, payload: TransitionCreate, x_demo_user: st
 
 @app.post("/v1/requests/{request_id}/proposals")
 def create_proposal(request_id: str, payload: ProposalCreate, x_demo_user: str | None = Header(default=None), x_workspace_id: str | None = Header(default=None)) -> dict[str, Any]:
-    actor, workspace, _ = actor_context(x_demo_user, x_workspace_id)
+    actor, workspace, role = actor_context(x_demo_user, x_workspace_id)
+    if role not in {"owner", "admin"}:
+        raise HTTPException(status_code=403, detail="Only operational staff can create action proposals")
     request = get_request(request_id, x_demo_user, x_workspace_id)
     created = store.create_proposal(request_id, workspace, payload.action_type, payload.payload, "high" if requires_approval(payload.action_type) else "low", requires_approval(payload.action_type))
     store.audit(workspace, actor, "proposal.created", request_id, "awaiting_approval" if created["approval_required"] else "proposed")
@@ -181,28 +233,38 @@ def create_proposal(request_id: str, payload: ProposalCreate, x_demo_user: str |
 
 @app.get("/v1/approvals")
 def approvals(x_demo_user: str | None = Header(default=None), x_workspace_id: str | None = Header(default=None)) -> list[dict[str, Any]]:
-    _, workspace, _ = actor_context(x_demo_user, x_workspace_id)
-    return store.list_approvals(workspace)
+    actor, workspace, role = actor_context(x_demo_user, x_workspace_id)
+    if role == "owner":
+        return store.list_approvals(workspace)
+    categories = allowed_categories(actor, role)
+    return [item for item in store.list_approvals(workspace) if categories and (store.get_request(item["proposal"]["request_id"]) or {}).get("category") in categories]
 
 
 def execute_approved(proposal: dict[str, Any], approval_id: str, actor: str) -> dict[str, Any]:
     request_id = proposal["request_id"]
     request = store.get_request(request_id) or {}
     action = proposal["action_type"]
-    response = {"action": action, "status": "executed-in-simulator", "external_id": f"SIM-{uuid.uuid4().hex[:8].upper()}"}
+    if action == "book_appointment":
+        slot = next((item for item in store.appointment_slots() if item["available"]), None)
+        if not slot:
+            raise HTTPException(status_code=409, detail="No appointment slots are available")
+        response = store.book_appointment({"workspace_id": request["workspace_id"], "request_id": request_id, "slot_id": slot["slot_id"], "service_type": "Technician visit", "caller_name": request["requester_name"]})
+    else:
+        response = {"action": action, "status": "executed-in-simulator", "external_id": f"SIM-{uuid.uuid4().hex[:8].upper()}"}
     store.audit(request.get("workspace_id", "demo-workspace"), actor, "proposal.executed", request_id, "approved", tool_name=action, approval_id=approval_id, idempotency_key=f"{proposal['id']}:approved", external_response=response)
     store.update_request(request_id, status="resolved")
     ticket = store.ticket_for_request(request_id)
     if ticket:
         store.transition_ticket(ticket["id"], "resolved")
+    store.mark_proposal_executed(proposal["id"])
     return response
 
 
 @app.post("/v1/approvals/{approval_id}/approve")
 def approve(approval_id: str, payload: ApprovalDecision | None = None, x_demo_user: str | None = Header(default=None), x_workspace_id: str | None = Header(default=None)) -> dict[str, Any]:
     actor, workspace, role = actor_context(x_demo_user, x_workspace_id)
-    if not can_approve(role):
-        raise HTTPException(status_code=403, detail="Only an owner or admin can approve protected actions")
+    if role != "owner":
+        raise HTTPException(status_code=403, detail="Only the IT administrator can approve protected actions")
     approvals_list = store.list_approvals(workspace)
     approval = next((item for item in approvals_list if item["id"] == approval_id), None)
     if not approval:
@@ -215,8 +277,8 @@ def approve(approval_id: str, payload: ApprovalDecision | None = None, x_demo_us
 @app.post("/v1/approvals/{approval_id}/reject")
 def reject(approval_id: str, payload: ApprovalDecision | None = None, x_demo_user: str | None = Header(default=None), x_workspace_id: str | None = Header(default=None)) -> dict[str, Any]:
     actor, workspace, role = actor_context(x_demo_user, x_workspace_id)
-    if not can_approve(role):
-        raise HTTPException(status_code=403, detail="Only an owner or admin can reject protected actions")
+    if role != "owner":
+        raise HTTPException(status_code=403, detail="Only the IT administrator can reject protected actions")
     approval = next((item for item in store.list_approvals(workspace) if item["id"] == approval_id), None)
     if not approval:
         raise HTTPException(status_code=404, detail="Approval not found")
@@ -229,7 +291,7 @@ def reject(approval_id: str, payload: ApprovalDecision | None = None, x_demo_use
 @app.post("/v1/knowledge/documents")
 def create_document(payload: DocumentCreate, x_demo_user: str | None = Header(default=None), x_workspace_id: str | None = Header(default=None)) -> dict[str, Any]:
     actor, workspace, role = actor_context(x_demo_user, x_workspace_id)
-    if role == "viewer" or payload.workspace_id != workspace:
+    if role not in {"owner", "admin"} or payload.workspace_id != workspace:
         raise HTTPException(status_code=403, detail="Insufficient permission to upload knowledge")
     checksum = hashlib.sha256(payload.content.encode()).hexdigest()
     document = store.add_document(payload.model_dump(), checksum)

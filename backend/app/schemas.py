@@ -20,6 +20,11 @@ class WorkspaceContext(BaseModel):
     role: Role = "admin"
 
 
+class LoginRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=240)
+    password: str = Field(min_length=1, max_length=240)
+
+
 class ServiceRequestCreate(BaseModel):
     content: str = Field(min_length=3, max_length=8000)
     source: Literal["web", "email", "phone", "api"] = "web"
@@ -107,4 +112,3 @@ class DocumentCreate(BaseModel):
 
 class EvaluationCreate(BaseModel):
     questions: list[KnowledgeQuery] = Field(min_length=1, max_length=100)
-

@@ -1,6 +1,6 @@
 # Service Desk AI
 
-Service Desk AI is a production-shaped, local-first service desk for operations teams. It receives requests from employees, customers, and simulated phone calls; classifies them; retrieves policy evidence; delegates to bounded ERP, CRM, and HR specialists; and pauses risky actions for human approval.
+Service Desk AI is a production-shaped, local-first service desk for operations teams. It authenticates users, receives their requests, retrieves policy evidence, delegates to bounded ERP, CRM, HR, or scheduling specialists, and pauses risky actions for IT approval.
 
 ## Quick start
 
@@ -12,7 +12,21 @@ Open http://localhost:3005. The API is available at http://localhost:8001/docs.
 
 The local profile uses SQLite and safe deterministic fallbacks so it works without API credentials. Set `OPENAI_API_KEY` in a local `.env` and keep `MODEL_PROVIDER=auto` to enable the AI router, RAG answer writer, and bounded specialist drafting. The model can classify and draft; trusted Python code validates its output, selects the only permitted tools, and keeps protected writes behind approval.
 
-Architecture and request examples are in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/API.md`](docs/API.md). A file-by-file technical map is in [`docs/REPOSITORY_MAP.md`](docs/REPOSITORY_MAP.md).
+Architecture and request examples are in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/API.md`](docs/API.md). A file-by-file technical map is in [`docs/REPOSITORY_MAP.md`](docs/REPOSITORY_MAP.md). Use [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md) for the walkthrough and [`docs/PRESENTATION.md`](docs/PRESENTATION.md) for the 10-minute presentation script.
+
+## Demo login
+
+All demo identities, role metadata, and password hashes are persisted in SQLite. The shared demo password is `demo123`.
+
+| Person | Email | Access |
+| --- | --- | --- |
+| Duc-Anh Nguyen | `duc-anh@example.com` | IT administrator: full oversight and the only protected-action approver. |
+| Giulia Rossi | `giulia@example.com` | HR specialist: HR work only. |
+| Alex Morgan | `alex@example.com` | CRM and ERP specialist: CRM, supply-chain, and appointment work only. |
+| Tim Keller | `tim@example.com` | Staff member: only requests that Tim created. |
+| John Carter | `john@example.com` | Customer: only requests that John created. |
+
+The FastAPI API, not just the UI, enforces request ownership and department-scoped visibility.
 
 ## Demo requests
 

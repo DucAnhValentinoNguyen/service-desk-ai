@@ -47,6 +47,31 @@ def test_viewer_cannot_approve_and_injection_is_refused(tmp_path: Path) -> None:
         assert rejected.status_code == 403
 
 
+def test_login_and_request_ownership_are_enforced(tmp_path: Path) -> None:
+    with client(tmp_path) as http:
+        login = http.post("/v1/auth/login", json={"email": "john@example.com", "password": "demo123"})
+        assert login.status_code == 200
+        assert login.json()["id"] == "john-customer"
+        john_headers = {"x-demo-user": "john-customer"}
+        john_request = http.post("/v1/requests", headers=john_headers, json={"content": "Customer reports a room sensor support problem."}).json()
+        tim_headers = {"x-demo-user": "tim-staff"}
+        assert http.get("/v1/requests", headers=tim_headers).json() == []
+        assert http.get(f"/v1/requests/{john_request['id']}", headers=tim_headers).status_code == 404
+        assert len(http.get("/v1/requests", headers=john_headers).json()) == 1
+
+
+def test_owner_approval_executes_and_resolves_ticket(tmp_path: Path) -> None:
+    with client(tmp_path) as http:
+        created = http.post("/v1/requests", json={"content": "Inventory is below the reorder point and the supplier PO is late."}).json()
+        approval_id = created["proposals"][0]["approval"]["id"]
+        approved = http.post(f"/v1/approvals/{approval_id}/approve", headers={"x-demo-user": "duc-anh"})
+        assert approved.status_code == 200
+        assert approved.json()["execution"]["status"] == "executed-in-simulator"
+        resolved = http.get(f"/v1/requests/{created['id']}", headers={"x-demo-user": "duc-anh"}).json()
+        assert resolved["status"] == "resolved"
+        assert resolved["proposals"][0]["status"] == "executed"
+
+
 def test_rag_returns_citations_and_calendar_is_idempotent(tmp_path: Path) -> None:
     with client(tmp_path) as http:
         answer = http.post("/v1/knowledge/query", json={"question": "What is the reorder point for gateway batteries?"})

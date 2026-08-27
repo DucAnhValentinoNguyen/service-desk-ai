@@ -6,7 +6,7 @@ The interactive OpenAPI contract is available at `/docs`.
 
 ```http
 POST /v1/requests
-X-Demo-User: demo-admin
+X-Demo-User: alex-ops
 Content-Type: application/json
 
 {"content":"Inventory for gateway batteries is below the reorder point and the supplier PO is late.","source":"web"}
@@ -29,10 +29,10 @@ Grounded answers contain citations. Low-evidence and prompt-injection requests r
 
 ```http
 POST /v1/approvals/{approval_id}/approve
-X-Demo-User: demo-admin
+X-Demo-User: duc-anh
 Content-Type: application/json
 
 {"note":"Reviewed by operations owner"}
 ```
 
-Only `owner` and `admin` demo roles can approve. The simulator write receives an idempotency key and the execution is appended to the ticket audit timeline.
+Only the `owner` IT administrator can approve. The simulator write receives an idempotency key, the proposal is marked executed, and the execution is appended to the ticket audit timeline.

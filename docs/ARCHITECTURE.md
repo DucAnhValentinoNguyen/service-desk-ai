@@ -3,7 +3,7 @@
 The service is intentionally split into trusted orchestration and untrusted model-facing components.
 
 ```text
-web / simulated call
+authenticated web inbox
         |
         v
 FastAPI intake -> guardrails -> deterministic router -> bounded specialist
@@ -30,6 +30,6 @@ The demo uses SQLite, a local object store, and an in-process retry runner. The 
 1. Submit the late purchase-order prompt and show the ERP proposal in Approvals.
 2. Submit the sensor-support prompt and show the CRM response proposal.
 3. Submit the leave-policy prompt and show HR evidence plus approval gating.
-4. Use Knowledge desk for a cited policy answer and an unsupported question.
-5. Start a busy-line call, submit a request, check calendar availability, and book a slot.
+4. Use the Inbox knowledge action for a cited policy answer and an unsupported question.
+5. Submit an appointment request and show its protected scheduling proposal.
 6. Submit the prompt-injection or mass-access prompt and show human escalation.

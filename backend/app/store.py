@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sqlite3
 import threading
 import uuid
@@ -36,11 +37,13 @@ class Store:
                 """
                 CREATE TABLE IF NOT EXISTS users (
                     id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, name TEXT NOT NULL,
-                    email TEXT NOT NULL, role TEXT NOT NULL, pii_scope TEXT NOT NULL
+                    email TEXT NOT NULL, role TEXT NOT NULL, pii_scope TEXT NOT NULL,
+                    department TEXT NOT NULL DEFAULT 'general', password_hash TEXT NOT NULL DEFAULT ''
                 );
                 CREATE TABLE IF NOT EXISTS requests (
                     id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, content TEXT NOT NULL,
                     source TEXT NOT NULL, requester_name TEXT NOT NULL, requester_email TEXT,
+                    requester_id TEXT NOT NULL DEFAULT 'demo-admin',
                     status TEXT NOT NULL, category TEXT NOT NULL, severity TEXT NOT NULL,
                     confidence REAL NOT NULL, rationale TEXT NOT NULL, assigned_agent TEXT,
                     answer TEXT, citations_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
@@ -93,18 +96,29 @@ class Store:
                 );
                 """
             )
+            # Existing demo databases predate login credentials and request ownership.
+            # SQLite migrations are deliberately additive so a Docker volume survives upgrades.
+            user_columns = {row["name"] for row in db.execute("PRAGMA table_info(users)").fetchall()}
+            if "department" not in user_columns:
+                db.execute("ALTER TABLE users ADD COLUMN department TEXT NOT NULL DEFAULT 'general'")
+            if "password_hash" not in user_columns:
+                db.execute("ALTER TABLE users ADD COLUMN password_hash TEXT NOT NULL DEFAULT ''")
+            request_columns = {row["name"] for row in db.execute("PRAGMA table_info(requests)").fetchall()}
+            if "requester_id" not in request_columns:
+                db.execute("ALTER TABLE requests ADD COLUMN requester_id TEXT NOT NULL DEFAULT 'demo-admin'")
+            db.commit()
 
     def seed(self) -> None:
         with self.lock, self.connect() as db:
-            if db.execute("SELECT 1 FROM users LIMIT 1").fetchone():
-                return
+            password = hashlib.sha256("demo123".encode()).hexdigest()
             users = [
-                ("demo-owner", "demo-workspace", "Duc (Owner)", "owner@example.com", "owner", "full"),
-                ("demo-admin", "demo-workspace", "Alex (Service Desk)", "admin@example.com", "admin", "operational"),
-                ("demo-member", "demo-workspace", "Mina (Employee)", "member@example.com", "member", "self"),
-                ("demo-viewer", "demo-workspace", "Sam (Viewer)", "viewer@example.com", "viewer", "aggregate"),
+                ("duc-anh", "demo-workspace", "Duc-Anh Nguyen", "duc-anh@example.com", "owner", "full", "IT administration", password),
+                ("giulia-hr", "demo-workspace", "Giulia Rossi", "giulia@example.com", "admin", "hr", "HR", password),
+                ("alex-ops", "demo-workspace", "Alex Morgan", "alex@example.com", "admin", "operational", "CRM and ERP", password),
+                ("tim-staff", "demo-workspace", "Tim Keller", "tim@example.com", "member", "self", "Finance", password),
+                ("john-customer", "demo-workspace", "John Carter", "john@example.com", "viewer", "self", "Customer", password),
             ]
-            db.executemany("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)", users)
+            db.executemany("INSERT OR REPLACE INTO users (id, workspace_id, name, email, role, pii_scope, department, password_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", users)
             documents = [
                 ("doc-supply-policy", "Supply Chain Reorder and Late PO Policy", "For gateway batteries, the reorder point is 20 units. A purchase order more than 48 hours late is a supplier-risk exception. Service desk staff may draft an expedite request, but changing a purchase order requires an operations manager approval.\n\nSection: Inventory exceptions\nOperators should check available stock, open purchase orders, and the promised delivery date before recommending an action.", "markdown", "internal"),
                 ("doc-crm-support", "Room Sensor Customer Support Playbook", "When a customer reports missing room-sensor readings, verify the device identifier, last-seen timestamp, signal quality, and installation power conditions. Create or link a CRM case and provide troubleshooting steps. Customer-facing messages require approval when they include compensation, cancellation, or a commitment.", "markdown", "internal"),
@@ -112,11 +126,24 @@ class Store:
                 ("doc-appointments", "Technician Appointment Policy", "Technician appointments are offered only from available calendar slots. The caller must confirm the selected time. A booking is idempotent and must not replace an existing appointment. If no suitable slot exists, offer alternatives or escalate to a human coordinator.", "markdown", "internal"),
                 ("doc-escalation", "Service Desk Escalation Policy", "Escalate requests when classification confidence is below 0.65, the request asks for an irreversible or protected change, identity is insufficient, the caller is abusive, or the knowledge base does not contain supporting evidence. Record the reason in the ticket timeline.", "markdown", "public"),
             ]
-            import hashlib
             for document_id, title, content, source_type, sensitivity in documents:
                 checksum = hashlib.sha256(content.encode()).hexdigest()
-                db.execute("INSERT INTO documents VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (document_id, "demo-workspace", title, content, source_type, sensitivity, "ready", checksum, now()))
+                db.execute("INSERT OR IGNORE INTO documents VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (document_id, "demo-workspace", title, content, source_type, sensitivity, "ready", checksum, now()))
             db.commit()
+
+    def user(self, user_id: str) -> dict[str, Any] | None:
+        with self.connect() as db:
+            return self._row(db.execute("SELECT id, workspace_id, name, email, role, pii_scope, department FROM users WHERE id = ?", (user_id,)).fetchone())
+
+    def authenticate(self, email: str, password: str) -> dict[str, Any] | None:
+        password_hash = hashlib.sha256(password.encode()).hexdigest()
+        with self.connect() as db:
+            row = db.execute("SELECT id, workspace_id, name, email, role, pii_scope, department FROM users WHERE lower(email) = lower(?) AND password_hash = ?", (email, password_hash)).fetchone()
+            return self._row(row)
+
+    def users(self, workspace_id: str) -> list[dict[str, Any]]:
+        with self.connect() as db:
+            return self._rows(db.execute("SELECT id, name, email, role, department FROM users WHERE workspace_id = ? ORDER BY role, name", (workspace_id,)).fetchall())
 
     def _row(self, row: sqlite3.Row | None) -> dict[str, Any] | None:
         return dict(row) if row else None
@@ -127,7 +154,7 @@ class Store:
     def create_request(self, data: dict[str, Any]) -> dict[str, Any]:
         request_id, timestamp = f"req-{uuid.uuid4().hex[:10]}", now()
         with self.lock, self.connect() as db:
-            db.execute("INSERT INTO requests VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (request_id, data["workspace_id"], data["content"], data["source"], data["requester_name"], data.get("requester_email"), "received", "unknown", "medium", 0.0, "Not classified", None, None, "[]", timestamp, timestamp))
+            db.execute("INSERT INTO requests VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (request_id, data["workspace_id"], data["content"], data["source"], data["requester_name"], data.get("requester_email"), data["requester_id"], "received", "unknown", "medium", 0.0, "Not classified", None, None, "[]", timestamp, timestamp))
             db.commit()
         return self.get_request(request_id) or {}
 
@@ -150,11 +177,17 @@ class Store:
                 row["citations"] = json.loads(row.pop("citations_json"))
             return row
 
-    def list_requests(self, workspace_id: str, status: str | None = None) -> list[dict[str, Any]]:
+    def list_requests(self, workspace_id: str, status: str | None = None, requester_id: str | None = None, categories: tuple[str, ...] | None = None) -> list[dict[str, Any]]:
         query, args = "SELECT * FROM requests WHERE workspace_id = ?", [workspace_id]
         if status:
             query += " AND status = ?"
             args.append(status)
+        if requester_id:
+            query += " AND requester_id = ?"
+            args.append(requester_id)
+        if categories:
+            query += f" AND category IN ({', '.join('?' for _ in categories)})"
+            args.extend(categories)
         query += " ORDER BY created_at DESC"
         with self.connect() as db:
             rows = self._rows(db.execute(query, args).fetchall())
@@ -230,6 +263,11 @@ class Store:
             for row in rows:
                 row["proposal"] = self.get_proposal(row["proposal_id"])
             return rows
+
+    def mark_proposal_executed(self, proposal_id: str) -> None:
+        with self.lock, self.connect() as db:
+            db.execute("UPDATE proposals SET status = 'executed' WHERE id = ?", (proposal_id,))
+            db.commit()
 
     def decide_approval(self, approval_id: str, status: str, decided_by: str, note: str | None) -> dict[str, Any] | None:
         with self.lock, self.connect() as db:
