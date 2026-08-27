@@ -5,6 +5,7 @@ from typing import Any
 from .adapters import CRMAdapter, HRAdapter, SupplyChainAdapter
 from .guardrails import inspect_input
 from .rag import query
+from .providers import get_provider
 from .schemas import KnowledgeQuery, RequestClassification
 from .store import Store
 
@@ -30,6 +31,18 @@ def classify(content: str) -> RequestClassification:
     safety = inspect_input(content)
     if not safety["safe"]:
         return RequestClassification(category=category, severity="high", confidence=0.1, rationale=f"Safety review required: {', '.join(safety['reasons'])}.", assigned_agent=None)
+    ai_route = get_provider().route(content)
+    if ai_route:
+        ai_category = ai_route.get("category")
+        if ai_category in AGENTS or ai_category in {"general", "unknown"}:
+            raw_confidence = ai_route.get("confidence", confidence)
+            try:
+                confidence = max(0.0, min(1.0, float(raw_confidence)))
+            except (TypeError, ValueError):
+                confidence = 0.0
+            severity = ai_route.get("severity") if ai_route.get("severity") in {"low", "medium", "high", "critical"} else severity
+            rationale = str(ai_route.get("rationale") or "AI router selected a supported category.")[:1000]
+            return RequestClassification(category=ai_category, severity=severity, confidence=confidence, rationale=rationale, assigned_agent=AGENTS.get(ai_category))
     rationale = f"Matched {category.replace('_', ' ')} operational terminology with confidence {confidence:.2f}."
     return RequestClassification(category=category, severity=severity, confidence=confidence, rationale=rationale, assigned_agent=AGENTS.get(category))
 
@@ -60,5 +73,12 @@ def run_specialist(store: Store, request: dict[str, Any]) -> dict[str, Any]:
             result["proposal"] = {"action_type": "approve_leave", "risk": "high", "payload": {"employee_id": employee["employee_id"], "available_days": employee["balance_days"], "manager_approval_required": True}}
     elif classification.category == "appointment":
         result["proposal"] = {"action_type": "book_appointment", "risk": "medium", "payload": {"requires_caller_confirmation": True}}
+    specialist = get_provider().specialist(classification.category, request["content"], evidence.answer)
+    if specialist and isinstance(specialist.get("answer"), str):
+        result["evidence"]["answer"] = specialist["answer"][:4000]
+    allowed_actions = {"supply_chain": "create_purchase_order", "crm": "send_customer_response", "hr": "approve_leave", "appointment": "book_appointment"}
+    ai_proposal = specialist.get("proposal") if specialist else None
+    if isinstance(ai_proposal, dict) and ai_proposal.get("action_type") == allowed_actions.get(classification.category) and result.get("proposal"):
+        result["proposal"]["payload"]["ai_draft"] = str(ai_proposal.get("draft") or "")[:2000]
     result["status"] = "awaiting_approval" if result["proposal"] else "resolved"
     return result

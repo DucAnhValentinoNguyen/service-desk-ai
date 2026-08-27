@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 import hashlib
 import json
 import os
@@ -21,7 +22,14 @@ from .schemas import (
 from .store import Store, now, store
 
 
-app = FastAPI(title="Service Desk AI", version="0.1.0", description="Guarded ERP, CRM, HRM, RAG, ticketing, and call orchestration demo")
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    store.seed()
+    ensure_index(store)
+    yield
+
+
+app = FastAPI(title="Service Desk AI", version="0.1.0", description="Guarded ERP, CRM, HRM, RAG, ticketing, and call orchestration demo", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -70,13 +78,6 @@ def apply_triage(request_id: str, actor: str = "service-desk-ai") -> dict[str, A
     decision = "escalated" if status == "awaiting_human" else "classified"
     store.audit(request["workspace_id"], actor, "request.triaged", request_id, decision, tool_name=classification.get("assigned_agent"))
     return request_bundle(request_id)
-
-
-@app.on_event("startup")
-def startup() -> None:
-    store.seed()
-    ensure_index(store)
-
 
 @app.get("/")
 def root() -> dict[str, str]:

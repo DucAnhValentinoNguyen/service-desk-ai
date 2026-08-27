@@ -26,16 +26,16 @@ This document explains the responsibility of each maintained file in the reposit
 ## Backend Application
 
 - `backend/app/__init__.py`: Marks `backend/app/` as the importable application package.
-- `backend/app/config.py`: Central environment-backed settings object for database path, model provider, and CORS origins.
+- `backend/app/config.py`: Central environment-backed settings object for database path, provider selection, OpenAI endpoint/model/timeout, and CORS origins.
 - `backend/app/main.py`: FastAPI entrypoint; defines every public endpoint, startup seeding/indexing, demo auth context, approval execution, and request orchestration.
 - `backend/app/schemas.py`: Pydantic request and response contracts shared across the API, the RAG flow, calls, approvals, and ticket transitions.
 - `backend/app/store.py`: SQLite persistence layer; owns schema creation, seeding, CRUD operations, audit trails, document chunks, calls, appointments, and simulator health state.
 - `backend/app/rag.py`: Local RAG implementation; handles document chunking, lightweight indexing, permission-aware retrieval, prompt-injection detection, citation shaping, and abstention behavior.
-- `backend/app/agents.py`: Deterministic router plus bounded specialist logic for supply chain, CRM, HR, and appointment flows.
+- `backend/app/agents.py`: Front-door AI router plus bounded specialist orchestration for supply chain, CRM, HR, and appointment flows; trusted code validates every model decision.
 - `backend/app/guardrails.py`: Central safety checks for abuse and prompt injection, approval gating, approver-role checks, and simple HR redaction.
 - `backend/app/adapters.py`: Contract-faithful simulator adapters for ERP, CRM, HRM, ticketing, and calendar tool surfaces.
 - `backend/app/ports.py`: Deployment seam definitions for object storage, queues, and identity, plus local development implementations.
-- `backend/app/providers.py`: Model-provider abstraction layer; currently includes a demo provider and an OpenAI-shaped placeholder adapter.
+- `backend/app/providers.py`: Model-provider abstraction layer with a no-network demo fallback and structured-output OpenAI-compatible adapter for routing, grounded answers, and specialist drafts.
 - `backend/app/jobs.py`: Local durable job runner abstraction with retries and dead-letter status for future background workflows.
 
 ## Frontend

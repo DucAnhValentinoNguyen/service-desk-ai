@@ -5,6 +5,7 @@ import uuid
 from typing import Any
 
 from .schemas import EvidenceCitation, KnowledgeAnswer, KnowledgeQuery
+from .providers import get_provider
 from .store import Store
 
 
@@ -79,5 +80,5 @@ def query(store: Store, request: KnowledgeQuery) -> KnowledgeAnswer:
         return KnowledgeAnswer(answer="I do not have enough approved evidence in the service-desk knowledge base to answer that safely. I have routed this for human review.", grounded=False, confidence=0.0 if not selected else round(selected[0][0], 3), citations=[], rejected_candidates=rejected, warning="Insufficient evidence")
     citations = [EvidenceCitation(document_id=document["id"], title=document["title"], page=chunk["page"], section=chunk["section"], chunk_id=chunk["id"], excerpt=chunk["content"], score=round(score, 3)) for score, chunk, document in selected]
     evidence = " ".join(f"{citation.excerpt}" for citation in citations[:3])
-    answer = f"Based on the approved service-desk procedures: {evidence}"
+    answer = get_provider().grounded_answer(request.question, evidence)
     return KnowledgeAnswer(answer=answer, grounded=True, confidence=round(min(0.98, selected[0][0] + 0.35), 3), citations=citations, rejected_candidates=rejected)
