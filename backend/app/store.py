@@ -119,6 +119,7 @@ class Store:
 
     def seed(self) -> None:
         with self.lock, self.connect() as db:
+            db.execute("DELETE FROM users WHERE id IN ('demo-owner', 'demo-admin', 'demo-member', 'demo-viewer')")
             password = hashlib.sha256("demo123".encode()).hexdigest()
             users = [
                 ("duc-anh", "demo-workspace", "Duc-Anh Nguyen", "duc-anh@example.com", "owner", "full", "IT administration", password),
