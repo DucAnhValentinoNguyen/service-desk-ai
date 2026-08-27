@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
+const API = process.env.NEXT_PUBLIC_API_URL || "/backend";
 
 type User = { id: string; name: string; email: string; role: "owner" | "admin" | "member" | "viewer"; department: string };
 type Citation = { title: string; page?: number; excerpt: string };

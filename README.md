@@ -10,7 +10,7 @@ docker compose up --build
 
 Open http://localhost:3005. The API is available at http://localhost:8001/docs.
 
-The local profile uses SQLite and safe deterministic fallbacks so it works without API credentials. Kimi K3 is the default live provider: set `KIMI_API_KEY` in a local `.env` to enable the AI router, RAG answer writer, and bounded specialist drafting. OpenAI remains available with `MODEL_PROVIDER=openai` and `OPENAI_API_KEY`; `MODEL_PROVIDER=auto` prefers Kimi, then OpenAI, then the deterministic fallback. The model can classify and draft; trusted Python code validates its output, selects the only permitted tools, and keeps protected writes behind approval.
+The local profile uses SQLite and safe deterministic fallbacks. To use Ollama, install Ollama on the host, then run `ollama pull gemma4:26b` and set `MODEL_PROVIDER=local`, `LOCAL_MODEL=gemma4:26b`, and `LOCAL_BASE_URL=http://host.docker.internal:11434/v1` in `.env`. On Linux, start Ollama with `OLLAMA_HOST=0.0.0.0:11434` so the API container can reach it; Docker Desktop on Windows normally provides `host.docker.internal` automatically. Restart Compose after changing `.env`. Kimi K3 is also available with `MODEL_PROVIDER=kimi` and `KIMI_API_KEY`; OpenAI with `MODEL_PROVIDER=openai` and `OPENAI_API_KEY`; `MODEL_PROVIDER=auto` prefers Kimi, then OpenAI, then the deterministic fallback. The model can classify and draft; trusted Python code validates its output, selects the only permitted tools, and keeps protected writes behind approval.
 
 Architecture and request examples are in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/API.md`](docs/API.md). A file-by-file technical map is in [`docs/REPOSITORY_MAP.md`](docs/REPOSITORY_MAP.md). Use [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md) for the walkthrough and [`docs/PRESENTATION.md`](docs/PRESENTATION.md) for the 10-minute presentation script.
 
@@ -71,7 +71,7 @@ service-desk-ai/
 │       ├── schemas.py               Pydantic API and domain contracts
 │       ├── store.py                 SQLite schema, CRUD, seed data, tickets, approvals, and audit log
 │       ├── agents.py                AI front router plus bounded ERP, CRM, HR, and scheduling specialists
-│       ├── providers.py             Demo fallback plus Kimi K3/OpenAI-compatible structured-output adapters
+│       ├── providers.py             Demo fallback plus Ollama, Kimi K3, and OpenAI-compatible adapters
 │       ├── rag.py                   Chunking, retrieval, permissions, citations, abstention, and answer writing
 │       ├── adapters.py               Read-only and simulator tool boundaries for enterprise systems
 │       ├── guardrails.py             Injection/abuse checks, role gates, approval policy, and HR redaction

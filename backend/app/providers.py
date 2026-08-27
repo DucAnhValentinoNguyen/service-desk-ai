@@ -103,8 +103,24 @@ class KimiProvider(OpenAICompatibleProvider):
     reasoning_effort: str | None = settings.kimi_reasoning_effort
 
 
+@dataclass
+class OllamaProvider(OpenAICompatibleProvider):
+    """Local Ollama server using its OpenAI-compatible API."""
+
+    name: str = "ollama"
+    api_key: str = settings.local_api_key
+    base_url: str = settings.local_base_url
+    model: str = settings.local_model
+
+
 def get_provider() -> ModelProvider:
     provider = settings.model_provider.lower()
+    if provider in {"local", "ollama"}:
+        return OllamaProvider(
+            api_key=settings.local_api_key,
+            base_url=settings.local_base_url,
+            model=settings.local_model,
+        )
     if provider in {"kimi", "auto"} and settings.kimi_api_key:
         return KimiProvider(api_key=settings.kimi_api_key, base_url=settings.kimi_base_url, model=settings.kimi_model, reasoning_effort=settings.kimi_reasoning_effort)
     if provider == "openai" and settings.openai_api_key:

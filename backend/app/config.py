@@ -16,6 +16,9 @@ class Settings:
     kimi_base_url: str = os.getenv("KIMI_BASE_URL", "https://api.moonshot.ai/v1")
     kimi_model: str = os.getenv("KIMI_MODEL", "kimi-k3")
     kimi_reasoning_effort: str = os.getenv("KIMI_REASONING_EFFORT", "low")
+    local_base_url: str = os.getenv("LOCAL_BASE_URL", "http://host.docker.internal:11434/v1")
+    local_api_key: str = os.getenv("LOCAL_API_KEY", "ollama")
+    local_model: str = os.getenv("LOCAL_MODEL", "gemma4:26b")
     ai_timeout_seconds: float = float(os.getenv("AI_TIMEOUT_SECONDS", "20"))
     cors_origins: tuple[str, ...] = tuple(
         origin.strip()

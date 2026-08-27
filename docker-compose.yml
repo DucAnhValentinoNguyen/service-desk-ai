@@ -5,6 +5,8 @@ services:
       dockerfile: Dockerfile
     ports:
       - "${API_PORT:-8001}:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       DATABASE_PATH: /app/data/service-desk.db
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3005,http://127.0.0.1:3005}
@@ -16,6 +18,9 @@ services:
       KIMI_BASE_URL: ${KIMI_BASE_URL:-https://api.moonshot.ai/v1}
       KIMI_MODEL: ${KIMI_MODEL:-kimi-k3}
       KIMI_REASONING_EFFORT: ${KIMI_REASONING_EFFORT:-low}
+      LOCAL_BASE_URL: ${LOCAL_BASE_URL:-http://host.docker.internal:11434/v1}
+      LOCAL_API_KEY: ${LOCAL_API_KEY:-ollama}
+      LOCAL_MODEL: ${LOCAL_MODEL:-gemma4:26b}
       AI_TIMEOUT_SECONDS: ${AI_TIMEOUT_SECONDS:-20}
     volumes:
       - service_desk_data:/app/data
@@ -33,7 +38,8 @@ services:
     ports:
       - "${FRONTEND_PORT:-3005}:3005"
     environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8001}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/backend}
+      SERVER_API_URL: ${SERVER_API_URL:-http://api:8000}
     depends_on:
       api:
         condition: service_healthy

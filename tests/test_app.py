@@ -3,10 +3,18 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.app.store import Store
-from backend.app.providers import DemoProvider, KimiProvider, OpenAIProvider, get_provider
+from backend.app.providers import DemoProvider, KimiProvider, OllamaProvider, OpenAIProvider, get_provider
+
+
+@pytest.fixture(autouse=True)
+def use_deterministic_provider(monkeypatch) -> None:
+    import backend.app.providers as providers
+
+    monkeypatch.setattr(providers, "settings", replace(providers.settings, model_provider="demo"))
 
 
 def client(tmp_path: Path) -> TestClient:
@@ -31,6 +39,9 @@ def test_provider_selection_supports_kimi_and_openai(monkeypatch) -> None:
 
     monkeypatch.setattr(providers, "settings", replace(providers.settings, model_provider="kimi", kimi_api_key=""))
     assert isinstance(get_provider(), DemoProvider)
+
+    monkeypatch.setattr(providers, "settings", replace(providers.settings, model_provider="local", local_model="gemma4:26b"))
+    assert isinstance(get_provider(), OllamaProvider)
 
 
 def test_supply_chain_request_creates_approval_and_ticket(tmp_path: Path) -> None:
