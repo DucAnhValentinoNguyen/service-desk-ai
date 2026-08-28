@@ -27,8 +27,8 @@ The demo uses SQLite, a local object store, and an in-process retry runner. The 
 
 ## Demo walkthrough
 
-1. Submit the late purchase-order prompt and show the ERP proposal in Approvals.
-2. Submit the sensor-support prompt and show the CRM response proposal.
+1. Submit the late purchase-order prompt and show the ERP proposal in the Inbox request detail.
+2. Submit the sensor-support prompt and show the CRM response proposal in the Inbox.
 3. Submit the leave-policy prompt and show HR evidence plus approval gating.
 4. Use the Inbox knowledge action for a cited policy answer and an unsupported question.
 5. Submit an appointment request and show its protected scheduling proposal.

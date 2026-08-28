@@ -8,7 +8,7 @@ Start with `docker compose up --build`, open `http://localhost:3005`, and sign i
 2. Sign out and use Tim Keller. Tim sees an empty queue until he creates a request, and never sees John's request.
 3. Sign in as Giulia Rossi. Submit an HR leave request as Giulia, then show that Giulia's operational view contains HR work only.
 4. Sign in as Alex Morgan. Show CRM and supply-chain work, but not HR work.
-5. Sign in as Duc-Anh Nguyen. Show the complete cross-domain queue and the Approvals tab.
+5. Sign in as Duc-Anh Nguyen. Show the complete cross-domain queue; pending approval work is marked in the Inbox.
 
 ## Demonstrate AI and RAG
 
@@ -18,7 +18,7 @@ Then use `Customer reports that her room sensor stopped sending temperature read
 
 ## Demonstrate approval and outcome
 
-Sign in as Duc-Anh Nguyen and open **Approvals**. The card shows the exact proposed action, safe payload, and any AI draft before execution. Select **Approve and execute**. The system records an audit event, executes the simulator action using an idempotency key, marks the proposal executed, resolves the request and ticket, and returns you to Inbox to see the result. Selecting **Reject** instead marks the request rejected and performs no external write.
+Sign in as Duc-Anh Nguyen and select a pending approval item in the **Inbox**. The request detail shows the exact proposed action, safe payload, and any AI draft before execution. Select **Approve and execute**. The system records an audit event, executes the simulator action using an idempotency key, marks the proposal executed, resolves the request and ticket, and updates the same Inbox item. Selecting **Reject** instead marks the request rejected and performs no external write.
 
 ## Demonstrate guardrails
 

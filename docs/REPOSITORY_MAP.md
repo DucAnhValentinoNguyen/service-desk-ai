@@ -57,7 +57,7 @@ This document explains the responsibility of each maintained file in the reposit
 - `frontend/tsconfig.json`: TypeScript compiler configuration for the app router frontend.
 - `frontend/next-env.d.ts`: Standard Next.js type shim that wires framework-generated types into TypeScript.
 - `frontend/app/layout.tsx`: Global HTML shell and page metadata for the frontend app router.
-- `frontend/app/page.tsx`: Main single-page demo console; renders login, role-scoped Inbox, combined knowledge query, request detail, and owner-only approvals.
+- `frontend/app/page.tsx`: Main single-page demo console; renders login, role-scoped Inbox, combined knowledge query, request detail, and owner-only approval actions.
 - `frontend/app/globals.css`: Global design system and responsive styling for the dashboard UI.
 
 ## Infrastructure
