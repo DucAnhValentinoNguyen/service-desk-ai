@@ -88,7 +88,7 @@ service-desk-ai/
 │   ├── next-env.d.ts                 Next.js generated type declarations
 │   └── app/
 │       ├── layout.tsx                HTML shell and page metadata
-│       ├── page.tsx                  Inbox, RAG desk, calls, approvals, and health console
+│       ├── page.tsx                  Inbox, RAG desk, request detail, and approval actions
 │       └── globals.css                Responsive visual system and component styling
 ├── infra/
 │   ├── postgres-init.sql             PostgreSQL/pgvector bootstrap starter

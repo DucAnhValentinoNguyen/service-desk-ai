@@ -31,17 +31,20 @@ def client(tmp_path: Path) -> TestClient:
 def test_provider_selection_supports_kimi_and_openai(monkeypatch) -> None:
     import backend.app.providers as providers
 
-    monkeypatch.setattr(providers, "settings", replace(providers.settings, model_provider="kimi", kimi_api_key="kimi-test-key"))
-    assert isinstance(get_provider(), KimiProvider)
+    # Keep these provider-selection overrides local to this test so the
+    # autouse deterministic-provider fixture survives for request-flow tests.
+    with monkeypatch.context() as isolated:
+        isolated.setattr(providers, "settings", replace(providers.settings, model_provider="kimi", kimi_api_key="kimi-test-key"))
+        assert isinstance(get_provider(), KimiProvider)
 
-    monkeypatch.setattr(providers, "settings", replace(providers.settings, model_provider="openai", openai_api_key="openai-test-key"))
-    assert isinstance(get_provider(), OpenAIProvider)
+        isolated.setattr(providers, "settings", replace(providers.settings, model_provider="openai", openai_api_key="openai-test-key"))
+        assert isinstance(get_provider(), OpenAIProvider)
 
-    monkeypatch.setattr(providers, "settings", replace(providers.settings, model_provider="kimi", kimi_api_key=""))
-    assert isinstance(get_provider(), DemoProvider)
+        isolated.setattr(providers, "settings", replace(providers.settings, model_provider="kimi", kimi_api_key=""))
+        assert isinstance(get_provider(), DemoProvider)
 
-    monkeypatch.setattr(providers, "settings", replace(providers.settings, model_provider="local", local_model="gemma4:26b"))
-    assert isinstance(get_provider(), OllamaProvider)
+        isolated.setattr(providers, "settings", replace(providers.settings, model_provider="local", local_model="gemma4:26b"))
+        assert isinstance(get_provider(), OllamaProvider)
 
 
 def test_supply_chain_request_creates_approval_and_ticket(tmp_path: Path) -> None:

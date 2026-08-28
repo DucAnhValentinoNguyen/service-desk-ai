@@ -18,7 +18,7 @@ Sign in as Alex and ask: `What should an operator check when a purchase order is
 
 ## 5:30-7:30 - End-to-end workflow
 
-Send the room-sensor support request through the same Inbox button. Show that the CRM specialist is selected, a ticket is created, the customer response is drafted, and no message has been sent yet. Sign in as Duc-Anh, open Approvals, and inspect the proposal payload. Approve it. Explain that approval triggers the simulator write with an idempotency key, adds the audit event, marks the proposal executed, and resolves the ticket. Rejecting would create the same audit trail but make no external write.
+Send the room-sensor support request through the same Inbox button. Show that the CRM specialist is selected, a ticket is created, the customer response is drafted, and no message has been sent yet. Sign in as Duc-Anh, select the pending item in the Inbox, and inspect the proposal payload in the request detail. Approve it. Explain that approval triggers the simulator write with an idempotency key, adds the audit event, marks the proposal executed, and resolves the ticket. Rejecting would create the same audit trail but make no external write.
 
 ## 7:30-8:45 - Guardrails
 
