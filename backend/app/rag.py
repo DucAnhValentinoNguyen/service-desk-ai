@@ -4,18 +4,29 @@ import re
 import uuid
 from typing import Any
 
-from .platform_bridge import platform_retrieve
+from .platform_bridge import platform_overview, platform_retrieve
 from .schemas import EvidenceCitation, KnowledgeAnswer, KnowledgeQuery
 from .providers import get_provider
 from .store import Store
 
 
 TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_-]+", re.I)
-INJECTION_RE = re.compile(r"ignore (all|any|the) previous|reveal (the )?system|developer message|bypass (the )?policy", re.I)
+INJECTION_RE = re.compile(
+    r"ignore (all|any|the|your) (previous|instructions?)|reveal (the )?system|developer message|bypass (the )?policy|(?:print|list|dump|show).*(all|every).*(documents|knowledge|prompts?)",
+    re.I,
+)
+NAME_RE = re.compile(r"\b(what(?:'s| is) your name|who are you)\b", re.I)
+DOC_COUNT_RE = re.compile(r"\b(how many|number of|count).*(documents|docs|knowledge)\b", re.I)
+STOPWORDS = {
+    "a", "all", "am", "an", "and", "are", "be", "can", "could", "do", "for",
+    "have", "how", "i", "if", "in", "is", "it", "many", "me", "my", "of",
+    "on", "our", "print", "the", "their", "there", "to", "we", "what", "who",
+    "why", "with", "you", "your",
+}
 
 
 def tokens(text: str) -> set[str]:
-    return set(TOKEN_RE.findall(text.lower()))
+    return {token for token in TOKEN_RE.findall(text.lower()) if token not in STOPWORDS}
 
 
 def contains_injection(text: str) -> bool:
@@ -60,9 +71,45 @@ def visible(document: dict[str, Any], role: str) -> bool:
     return role in {"owner", "admin", "member"}
 
 
+def _metadata_answer(store: Store, request: KnowledgeQuery) -> KnowledgeAnswer | None:
+    question = " ".join(request.question.lower().split())
+    if NAME_RE.search(question):
+        return KnowledgeAnswer(
+            answer="I am Service Desk AI, the guarded operations assistant for this demo workspace.",
+            grounded=True,
+            confidence=1.0,
+            citations=[],
+            rejected_candidates=[],
+        )
+    if DOC_COUNT_RE.search(question):
+        local_documents = len(store.documents(request.workspace_id))
+        platform = platform_overview()
+        platform_documents = int(platform.get("knowledge_stats", {}).get("documents", 0)) if platform.get("available") else 0
+        platform_chunks = int(platform.get("knowledge_stats", {}).get("chunks", 0)) if platform.get("available") else 0
+        if platform_documents:
+            answer = (
+                f"I currently have access to {local_documents} service-desk knowledge documents and "
+                f"{platform_documents} platform knowledge documents in the latest connected run, "
+                f"split into {platform_chunks} retrieval chunks."
+            )
+        else:
+            answer = f"I currently have access to {local_documents} service-desk knowledge documents in this workspace."
+        return KnowledgeAnswer(
+            answer=answer,
+            grounded=True,
+            confidence=0.99,
+            citations=[],
+            rejected_candidates=[],
+        )
+    return None
+
+
 def query(store: Store, request: KnowledgeQuery) -> KnowledgeAnswer:
     if contains_injection(request.question):
         return KnowledgeAnswer(answer="I cannot follow instructions embedded in a request that try to override service-desk policies.", grounded=False, confidence=0.0, citations=[], warning="Prompt-injection attempt detected; routed to safe refusal.")
+    metadata = _metadata_answer(store, request)
+    if metadata:
+        return metadata
     candidates = []
     question_tokens = tokens(request.question)
     for chunk in store.chunks(request.workspace_id):

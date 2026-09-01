@@ -31,6 +31,17 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def _count_jsonl(path: Path) -> int:
+    if not path.exists():
+        return 0
+    count = 0
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                count += 1
+    return count
+
+
 def platform_root() -> Path:
     return Path(settings.platform_data_path)
 
@@ -52,6 +63,8 @@ def platform_overview() -> dict[str, Any]:
     summary = _read_json(root / "runs" / f"{run_id}.json")
     features_path = root / "gold" / f"run_id={run_id}" / "sensor_health_features.jsonl"
     features = _read_jsonl(features_path) if features_path.exists() else []
+    documents_path = root / "knowledge" / "raw" / f"run_id={run_id}" / "documents.jsonl"
+    chunks_path = root / "knowledge" / "chunks" / f"run_id={run_id}" / "chunks.jsonl"
     risky = [row for row in features if row.get("predicted_risk") or row.get("anomalies")]
     risky.sort(key=lambda row: float(row.get("risk_score", 0.0)), reverse=True)
     top_devices = [
@@ -74,6 +87,10 @@ def platform_overview() -> dict[str, Any]:
             "knowledge": str(root / "knowledge"),
         },
         "summary": summary,
+        "knowledge_stats": {
+            "documents": _count_jsonl(documents_path),
+            "chunks": _count_jsonl(chunks_path),
+        },
         "top_risky_devices": top_devices,
     }
 

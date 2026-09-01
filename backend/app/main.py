@@ -148,7 +148,8 @@ def process_knowledge(
             firmware_version=firmware_version,
         ),
     ).model_dump()
-    if not result["grounded"]:
+    warning = str(result.get("warning") or "")
+    if not result["grounded"] and "Prompt-injection attempt detected" not in warning:
         result["escalation"] = create_human_escalation(question, actor, workspace, result.get("warning") or "Knowledge answer requires human review")
     return result
 
@@ -207,7 +208,10 @@ def intake(payload: ServiceRequestCreate, x_demo_user: str | None = Header(defau
     actor, workspace, role = actor_context(x_demo_user, x_workspace_id)
     if payload.workspace_id != workspace:
         raise HTTPException(status_code=403, detail="Workspace access denied")
+    safety = inspect_input(payload.content)
     route = classify(payload.content).model_dump()
+    if "prompt_injection" in safety["reasons"]:
+        return {"kind": "knowledge", "route": route, "knowledge": process_knowledge(payload.content, actor, workspace, role)}
     if looks_like_knowledge_query(payload.content):
         return {"kind": "knowledge", "route": route, "knowledge": process_knowledge(payload.content, actor, workspace, role)}
     return {"kind": "request", "route": route, "request": process_request(payload, actor, workspace)}
