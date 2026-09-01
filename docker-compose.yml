@@ -9,6 +9,7 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       DATABASE_PATH: /app/data/service-desk.db
+      PLATFORM_DATA_PATH: ${PLATFORM_DATA_PATH:-/platform-data}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3005,http://127.0.0.1:3005}
       MODEL_PROVIDER: ${MODEL_PROVIDER:-kimi}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -24,6 +25,7 @@ services:
       AI_TIMEOUT_SECONDS: ${AI_TIMEOUT_SECONDS:-20}
     volumes:
       - service_desk_data:/app/data
+      - ${PLATFORM_HOST_DATA_PATH:-../ai-data-platform/data}:/platform-data:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
       interval: 10s
