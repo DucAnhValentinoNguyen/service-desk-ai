@@ -96,6 +96,17 @@ class Store:
                     request_id TEXT, slot_id TEXT NOT NULL UNIQUE, service_type TEXT NOT NULL,
                     caller_name TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS conversations (
+                    id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, user_id TEXT NOT NULL,
+                    title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS conversation_messages (
+                    id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+                    role TEXT NOT NULL, label TEXT NOT NULL, tone TEXT, content TEXT NOT NULL,
+                    confidence REAL, citations_json TEXT NOT NULL DEFAULT '[]', note TEXT,
+                    related_request_id TEXT, created_at TEXT NOT NULL,
+                    FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+                );
                 """
             )
             # Existing demo databases predate login credentials and request ownership.
@@ -182,6 +193,169 @@ class Store:
 
     def _rows(self, rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
         return [dict(row) for row in rows]
+
+    def _conversation_summary(self, row: sqlite3.Row | None) -> dict[str, Any] | None:
+        item = self._row(row)
+        if not item:
+            return None
+        item["message_count"] = int(item.get("message_count") or 0)
+        return item
+
+    def _conversation_message(self, row: sqlite3.Row | None) -> dict[str, Any] | None:
+        item = self._row(row)
+        if not item:
+            return None
+        item["citations"] = json.loads(item.pop("citations_json", "[]"))
+        return item
+
+    def create_conversation(self, workspace_id: str, user_id: str, title: str = "New chat") -> dict[str, Any]:
+        conversation_id = f"conv-{uuid.uuid4().hex[:10]}"
+        timestamp = now()
+        with self.lock, self.connect() as db:
+            db.execute(
+                "INSERT INTO conversations VALUES (?, ?, ?, ?, ?, ?)",
+                (conversation_id, workspace_id, user_id, title[:120], timestamp, timestamp),
+            )
+            db.commit()
+        return self.get_conversation(conversation_id, workspace_id, user_id) or {}
+
+    def list_conversations(self, workspace_id: str, user_id: str) -> list[dict[str, Any]]:
+        query = """
+            SELECT
+                c.id,
+                c.workspace_id,
+                c.user_id,
+                c.title,
+                c.created_at,
+                c.updated_at,
+                COUNT(m.id) AS message_count,
+                COALESCE(MAX(m.created_at), c.updated_at) AS last_message_at,
+                (
+                    SELECT content
+                    FROM conversation_messages cm
+                    WHERE cm.conversation_id = c.id
+                    ORDER BY cm.created_at DESC
+                    LIMIT 1
+                ) AS last_message_preview
+            FROM conversations c
+            LEFT JOIN conversation_messages m ON m.conversation_id = c.id
+            WHERE c.workspace_id = ? AND c.user_id = ?
+            GROUP BY c.id, c.workspace_id, c.user_id, c.title, c.created_at, c.updated_at
+            ORDER BY c.updated_at DESC
+        """
+        with self.connect() as db:
+            rows = db.execute(query, (workspace_id, user_id)).fetchall()
+        return [self._conversation_summary(row) or {} for row in rows]
+
+    def get_conversation(self, conversation_id: str, workspace_id: str, user_id: str) -> dict[str, Any] | None:
+        with self.connect() as db:
+            summary = self._conversation_summary(db.execute(
+                """
+                SELECT
+                    c.id,
+                    c.workspace_id,
+                    c.user_id,
+                    c.title,
+                    c.created_at,
+                    c.updated_at,
+                    COUNT(m.id) AS message_count,
+                    COALESCE(MAX(m.created_at), c.updated_at) AS last_message_at,
+                    (
+                        SELECT content
+                        FROM conversation_messages cm
+                        WHERE cm.conversation_id = c.id
+                        ORDER BY cm.created_at DESC
+                        LIMIT 1
+                    ) AS last_message_preview
+                FROM conversations c
+                LEFT JOIN conversation_messages m ON m.conversation_id = c.id
+                WHERE c.id = ? AND c.workspace_id = ? AND c.user_id = ?
+                GROUP BY c.id, c.workspace_id, c.user_id, c.title, c.created_at, c.updated_at
+                """,
+                (conversation_id, workspace_id, user_id),
+            ).fetchone())
+            if not summary:
+                return None
+            messages = db.execute(
+                """
+                SELECT id, conversation_id, workspace_id, role, label, tone, content,
+                       confidence, citations_json, note, related_request_id, created_at
+                FROM conversation_messages
+                WHERE conversation_id = ?
+                ORDER BY created_at
+                """,
+                (conversation_id,),
+            ).fetchall()
+        summary["messages"] = [self._conversation_message(row) or {} for row in messages]
+        return summary
+
+    def rename_conversation(self, conversation_id: str, workspace_id: str, user_id: str, title: str) -> dict[str, Any] | None:
+        with self.lock, self.connect() as db:
+            db.execute(
+                "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ? AND workspace_id = ? AND user_id = ?",
+                (title[:120], now(), conversation_id, workspace_id, user_id),
+            )
+            db.commit()
+        return self.get_conversation(conversation_id, workspace_id, user_id)
+
+    def add_conversation_message(
+        self,
+        conversation_id: str,
+        workspace_id: str,
+        user_id: str,
+        role: str,
+        label: str,
+        content: str,
+        tone: str | None = None,
+        confidence: float | None = None,
+        citations: list[dict[str, Any]] | None = None,
+        note: str | None = None,
+        related_request_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        message_id = f"msg-{uuid.uuid4().hex[:10]}"
+        timestamp = now()
+        with self.lock, self.connect() as db:
+            owned = db.execute(
+                "SELECT 1 FROM conversations WHERE id = ? AND workspace_id = ? AND user_id = ?",
+                (conversation_id, workspace_id, user_id),
+            ).fetchone()
+            if not owned:
+                return None
+            db.execute(
+                """
+                INSERT INTO conversation_messages
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    message_id,
+                    conversation_id,
+                    workspace_id,
+                    role,
+                    label,
+                    tone,
+                    content,
+                    confidence,
+                    json.dumps(citations or []),
+                    note,
+                    related_request_id,
+                    timestamp,
+                ),
+            )
+            db.execute(
+                "UPDATE conversations SET updated_at = ? WHERE id = ?",
+                (timestamp, conversation_id),
+            )
+            db.commit()
+        with self.connect() as db:
+            return self._conversation_message(db.execute(
+                """
+                SELECT id, conversation_id, workspace_id, role, label, tone, content,
+                       confidence, citations_json, note, related_request_id, created_at
+                FROM conversation_messages
+                WHERE id = ?
+                """,
+                (message_id,),
+            ).fetchone())
 
     def create_request(self, data: dict[str, Any]) -> dict[str, Any]:
         request_id, timestamp = f"req-{uuid.uuid4().hex[:10]}", now()

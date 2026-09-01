@@ -16,9 +16,9 @@ from .guardrails import can_approve, inspect_input, redact_hr, requires_approval
 from .platform_bridge import platform_overview
 from .rag import ensure_index, ingest_document, query
 from .schemas import (
-    ApprovalDecision, CallCreate, CallMessage, CommentCreate, DocumentCreate, LoginRequest,
-    EvaluationCreate, KnowledgeQuery, ProposalCreate, ScheduleRequest,
-    ServiceRequestCreate, TransitionCreate,
+    ApprovalDecision, CallCreate, CallMessage, ChatCreate, CommentCreate, ConversationCreate,
+    DocumentCreate, LoginRequest, EvaluationCreate, KnowledgeQuery, ProposalCreate,
+    ScheduleRequest, ServiceRequestCreate, TransitionCreate,
 )
 from .store import Store, now, store
 
@@ -153,6 +153,90 @@ def process_knowledge(
         result["escalation"] = create_human_escalation(question, actor, workspace, result.get("warning") or "Knowledge answer requires human review")
     return result
 
+
+def conversation_title_from_text(text: str) -> str:
+    normalized = " ".join(text.strip().split())
+    return normalized[:72] if len(normalized) <= 72 else f"{normalized[:69].rstrip()}..."
+
+
+def assistant_message_from_result(result: dict[str, Any]) -> dict[str, Any]:
+    if result["kind"] == "knowledge" and result.get("knowledge"):
+        knowledge = result["knowledge"]
+        return {
+            "role": "assistant",
+            "label": "Grounded answer" if knowledge["grounded"] else "Safe refusal",
+            "tone": "grounded" if knowledge["grounded"] else "abstained",
+            "content": knowledge["answer"],
+            "confidence": knowledge["confidence"],
+            "citations": knowledge["citations"],
+            "note": knowledge.get("warning") or (
+                f"Human-review ticket created: {knowledge['escalation']['ticket_id']}"
+                if knowledge.get("escalation")
+                else None
+            ),
+            "related_request_id": knowledge.get("escalation", {}).get("request_id") if knowledge.get("escalation") else None,
+        }
+    request = result.get("request") or {}
+    return {
+        "role": "assistant",
+        "label": "Tracked request",
+        "tone": "request",
+        "content": request.get("answer") or f"Created {request.get('ticket', {}).get('id') or request.get('id')} with status {request.get('status', 'received').replace('_', ' ')}.",
+        "confidence": result["route"]["confidence"],
+        "citations": request.get("citations", []),
+        "note": f"Category: {request.get('category', 'unknown').replace('_', ' ')}. {'Protected action proposal prepared for review.' if request.get('proposals') else request.get('rationale', '')}",
+        "related_request_id": request.get("id"),
+    }
+
+
+def process_chat_message(payload: ChatCreate, actor: str, workspace: str, role: str) -> dict[str, Any]:
+    if payload.workspace_id != workspace:
+        raise HTTPException(status_code=403, detail="Workspace access denied")
+    conversation = store.get_conversation(payload.conversation_id, workspace, actor) if payload.conversation_id else None
+    if payload.conversation_id and not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if not conversation:
+        conversation = store.create_conversation(workspace, actor, conversation_title_from_text(payload.content))
+    elif conversation.get("message_count", 0) == 0 or conversation["title"] == "New chat":
+        conversation = store.rename_conversation(conversation["id"], workspace, actor, conversation_title_from_text(payload.content)) or conversation
+    user_message = store.add_conversation_message(
+        conversation_id=conversation["id"],
+        workspace_id=workspace,
+        user_id=actor,
+        role="user",
+        label="You",
+        content=payload.content,
+    )
+    safety = inspect_input(payload.content)
+    route = classify(payload.content).model_dump()
+    if "prompt_injection" in safety["reasons"]:
+        result = {"kind": "knowledge", "route": route, "knowledge": process_knowledge(payload.content, actor, workspace, role)}
+    elif looks_like_knowledge_query(payload.content):
+        result = {"kind": "knowledge", "route": route, "knowledge": process_knowledge(payload.content, actor, workspace, role)}
+    else:
+        result = {"kind": "request", "route": route, "request": process_request(ServiceRequestCreate(content=payload.content, workspace_id=workspace), actor, workspace)}
+    assistant_message = assistant_message_from_result(result)
+    stored_assistant = store.add_conversation_message(
+        conversation_id=conversation["id"],
+        workspace_id=workspace,
+        user_id=actor,
+        role=assistant_message["role"],
+        label=assistant_message["label"],
+        content=assistant_message["content"],
+        tone=assistant_message["tone"],
+        confidence=assistant_message["confidence"],
+        citations=assistant_message["citations"],
+        note=assistant_message["note"],
+        related_request_id=assistant_message.get("related_request_id"),
+    )
+    conversation = store.get_conversation(conversation["id"], workspace, actor) or conversation
+    return {
+        "conversation": conversation,
+        "user_message": user_message,
+        "assistant_message": stored_assistant,
+        "result": result,
+    }
+
 @app.get("/")
 def root() -> dict[str, str]:
     return {"service": "service-desk-ai", "docs": "/docs", "health": "/healthz"}
@@ -174,6 +258,35 @@ def health() -> dict[str, Any]:
 def platform_status(x_demo_user: str | None = Header(default=None), x_workspace_id: str | None = Header(default=None)) -> dict[str, Any]:
     actor_context(x_demo_user, x_workspace_id)
     return platform_overview()
+
+
+@app.get("/v1/conversations")
+def conversations(x_demo_user: str | None = Header(default=None), x_workspace_id: str | None = Header(default=None)) -> list[dict[str, Any]]:
+    actor, workspace, _ = actor_context(x_demo_user, x_workspace_id)
+    return store.list_conversations(workspace, actor)
+
+
+@app.post("/v1/conversations")
+def create_conversation(payload: ConversationCreate, x_demo_user: str | None = Header(default=None), x_workspace_id: str | None = Header(default=None)) -> dict[str, Any]:
+    actor, workspace, _ = actor_context(x_demo_user, x_workspace_id)
+    if payload.workspace_id != workspace:
+        raise HTTPException(status_code=403, detail="Workspace access denied")
+    return store.create_conversation(workspace, actor, payload.title)
+
+
+@app.get("/v1/conversations/{conversation_id}")
+def get_conversation(conversation_id: str, x_demo_user: str | None = Header(default=None), x_workspace_id: str | None = Header(default=None)) -> dict[str, Any]:
+    actor, workspace, _ = actor_context(x_demo_user, x_workspace_id)
+    conversation = store.get_conversation(conversation_id, workspace, actor)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return conversation
+
+
+@app.post("/v1/chat")
+def chat(payload: ChatCreate, x_demo_user: str | None = Header(default=None), x_workspace_id: str | None = Header(default=None)) -> dict[str, Any]:
+    actor, workspace, role = actor_context(x_demo_user, x_workspace_id)
+    return process_chat_message(payload, actor, workspace, role)
 
 
 @app.post("/v1/auth/login")

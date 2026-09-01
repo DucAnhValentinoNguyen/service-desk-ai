@@ -120,3 +120,14 @@ class DocumentCreate(BaseModel):
 
 class EvaluationCreate(BaseModel):
     questions: list[KnowledgeQuery] = Field(min_length=1, max_length=100)
+
+
+class ConversationCreate(BaseModel):
+    title: str = Field(default="New chat", min_length=1, max_length=120)
+    workspace_id: str = "demo-workspace"
+
+
+class ChatCreate(BaseModel):
+    content: str = Field(min_length=1, max_length=8000)
+    conversation_id: str | None = None
+    workspace_id: str = "demo-workspace"
