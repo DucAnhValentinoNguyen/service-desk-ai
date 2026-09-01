@@ -14,6 +14,15 @@ The local profile uses SQLite and safe deterministic fallbacks. To use Ollama, i
 
 Architecture and request examples are in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/API.md`](docs/API.md). A file-by-file technical map is in [`docs/REPOSITORY_MAP.md`](docs/REPOSITORY_MAP.md). Use [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md) for the walkthrough and [`docs/PRESENTATION.md`](docs/PRESENTATION.md) for the 10-minute presentation script.
 
+## AI data platform bridge
+
+This application can now read curated outputs from the sibling
+`ai-data-platform` repository. When `PLATFORM_DATA_PATH` points at the
+platform's `data/` folder, the API reads the latest gold telemetry artifacts
+and platform knowledge chunks, and the UI shows the latest connected run plus
+top risky devices. The Compose file mounts `../ai-data-platform/data` into the
+API container read-only by default through `PLATFORM_HOST_DATA_PATH`.
+
 ## RAG corpus and public sources
 
 The RAG implementation is in `backend/app/rag.py`. It chunks documents, applies workspace and sensitivity filters, ranks by token overlap, returns page/section citations, rejects prompt injection, abstains when evidence is insufficient, and passes approved evidence to the configured answer provider. The API routes are in `backend/app/main.py`, and the model adapter is in `backend/app/providers.py`.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -26,6 +27,50 @@ def client(tmp_path: Path) -> TestClient:
 
     ensure_index(main.store)
     return TestClient(main.app)
+
+
+def seed_platform_data(root: Path) -> None:
+    (root / "runs").mkdir(parents=True, exist_ok=True)
+    (root / "gold" / "run_id=platform-demo").mkdir(parents=True, exist_ok=True)
+    (root / "knowledge" / "chunks" / "run_id=platform-demo").mkdir(parents=True, exist_ok=True)
+    (root / "runs" / "platform-demo.json").write_text(json.dumps({
+        "run_id": "platform-demo",
+        "gold": {"sensor_health_features": 2},
+        "training": {"model_name": "sensor-health-threshold-baseline"},
+        "evaluation": {"risk_rate": 0.5},
+    }), encoding="utf-8")
+    (root / "gold" / "run_id=platform-demo" / "sensor_health_features.jsonl").write_text(
+        "\n".join([
+            json.dumps({"device_id": "sensor-001", "gateway_id": "gateway-01", "risk_score": 0.81, "predicted_risk": True, "anomalies": ["low_battery"]}),
+            json.dumps({"device_id": "sensor-002", "gateway_id": "gateway-02", "risk_score": 0.62, "predicted_risk": True, "anomalies": ["weak_signal"]}),
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    (root / "knowledge" / "chunks" / "run_id=platform-demo" / "chunks.jsonl").write_text(
+        "\n".join([
+            json.dumps({
+                "chunk_id": "chunk-1",
+                "document_id": "doc-1",
+                "title": "Telemetry anomaly summary",
+                "chunk_index": 1,
+                "source_type": "telemetry_summary",
+                "source_uri": "https://example.invalid/platform",
+                "content": "Device sensor-001 on gateway-01 shows low battery and should receive proactive support attention.",
+                "metadata": {},
+            }),
+            json.dumps({
+                "chunk_id": "chunk-2",
+                "document_id": "doc-2",
+                "title": "Signal troubleshooting guide",
+                "chunk_index": 1,
+                "source_type": "knowledge_base",
+                "source_uri": "https://example.invalid/guide",
+                "content": "Weak signal events should be checked against gateway placement and maintenance windows.",
+                "metadata": {},
+            }),
+        ]) + "\n",
+        encoding="utf-8",
+    )
 
 
 def test_provider_selection_supports_kimi_and_openai(monkeypatch) -> None:
@@ -134,3 +179,24 @@ def test_rag_filter_and_unsupported_question_create_human_ticket(tmp_path: Path)
         assert filtered.json()["escalation"]["ticket_id"].startswith("TKT-")
         requests = http.get("/v1/requests").json()
         assert any(item["status"] == "awaiting_human" for item in requests)
+
+
+def test_platform_overview_and_rag_bridge_are_available(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    platform_root = tmp_path / "platform-data"
+    seed_platform_data(platform_root)
+    import backend.app.config as config
+    import backend.app.main as main
+    import backend.app.platform_bridge as platform_bridge
+
+    monkeypatch.setattr(config, "settings", replace(config.settings, platform_data_path=str(platform_root)))
+    monkeypatch.setattr(main, "settings", replace(main.settings, platform_data_path=str(platform_root)))
+    monkeypatch.setattr(platform_bridge, "settings", replace(platform_bridge.settings, platform_data_path=str(platform_root)))
+
+    with client(tmp_path) as http:
+        overview = http.get("/v1/platform/overview")
+        assert overview.status_code == 200
+        assert overview.json()["available"] is True
+        answer = http.post("/v1/knowledge/query", json={"question": "Which devices need proactive support attention because of low battery?"})
+        assert answer.status_code == 200
+        assert answer.json()["grounded"] is True
+        assert any("platform" in citation["title"].lower() for citation in answer.json()["citations"])

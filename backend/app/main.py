@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .agents import classify, looks_like_knowledge_query, run_specialist
 from .config import settings
 from .guardrails import can_approve, inspect_input, redact_hr, requires_approval
+from .platform_bridge import platform_overview
 from .rag import ensure_index, ingest_document, query
 from .schemas import (
     ApprovalDecision, CallCreate, CallMessage, CommentCreate, DocumentCreate, LoginRequest,
@@ -158,7 +159,20 @@ def root() -> dict[str, str]:
 
 @app.get("/healthz")
 def health() -> dict[str, Any]:
-    return {"status": "ok", "provider": settings.model_provider, "storage": "sqlite-local", "version": app.version}
+    return {
+        "status": "ok",
+        "provider": settings.model_provider,
+        "storage": "sqlite-local",
+        "platform_data_path": settings.platform_data_path,
+        "platform_available": platform_overview().get("available", False),
+        "version": app.version,
+    }
+
+
+@app.get("/v1/platform/overview")
+def platform_status(x_demo_user: str | None = Header(default=None), x_workspace_id: str | None = Header(default=None)) -> dict[str, Any]:
+    actor_context(x_demo_user, x_workspace_id)
+    return platform_overview()
 
 
 @app.post("/v1/auth/login")

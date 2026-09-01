@@ -4,6 +4,7 @@ import re
 import uuid
 from typing import Any
 
+from .platform_bridge import platform_retrieve
 from .schemas import EvidenceCitation, KnowledgeAnswer, KnowledgeQuery
 from .providers import get_provider
 from .store import Store
@@ -79,11 +80,41 @@ def query(store: Store, request: KnowledgeQuery) -> KnowledgeAnswer:
         if score:
             candidates.append((score, chunk, document))
     candidates.sort(key=lambda item: item[0], reverse=True)
-    selected = candidates[: request.top_k]
+    local_selected = candidates[: request.top_k]
     rejected = [{"chunk_id": chunk["id"], "title": document["title"], "score": round(score, 3), "reason": "ranked below top_k"} for score, chunk, document in candidates[request.top_k : request.top_k + 3]]
-    if not selected or selected[0][0] < 0.16:
-        return KnowledgeAnswer(answer="I do not have enough approved evidence in the service-desk knowledge base to answer that safely. I have routed this for human review.", grounded=False, confidence=0.0 if not selected else round(selected[0][0], 3), citations=[], rejected_candidates=rejected, warning="Insufficient evidence")
-    citations = [EvidenceCitation(document_id=document["id"], title=document["title"], page=chunk["page"], section=chunk["section"], chunk_id=chunk["id"], excerpt=chunk["content"], score=round(score, 3), source_url=document.get("source_url")) for score, chunk, document in selected]
-    evidence = " ".join(f"{citation.excerpt}" for citation in citations[:3])
+    local_citations = [
+        EvidenceCitation(
+            document_id=document["id"],
+            title=document["title"],
+            page=chunk["page"],
+            section=chunk["section"],
+            chunk_id=chunk["id"],
+            excerpt=chunk["content"],
+            score=round(score, 3),
+            source_url=document.get("source_url"),
+        )
+        for score, chunk, document in local_selected
+    ]
+    platform = platform_retrieve(request.question, request.top_k)
+    combined = sorted(
+        [citation for citation in [*local_citations, *platform["citations"]] if citation.score > 0],
+        key=lambda citation: citation.score,
+        reverse=True,
+    )[: request.top_k]
+    grounded = bool(combined) and combined[0].score >= 0.16
+    if not grounded:
+        return KnowledgeAnswer(
+            answer="I do not have enough approved evidence in the service-desk knowledge base to answer that safely. I have routed this for human review.",
+            grounded=False,
+            confidence=round(max([citation.score for citation in combined], default=0.0), 3),
+            citations=[],
+            rejected_candidates=rejected,
+            warning="Insufficient evidence",
+        )
+    evidence = " ".join(citation.excerpt for citation in combined[:3])
     answer = get_provider().grounded_answer(request.question, evidence, request.answer_mode)
-    return KnowledgeAnswer(answer=answer, grounded=True, confidence=round(min(0.98, selected[0][0] + 0.35), 3), citations=citations, rejected_candidates=rejected)
+    confidence = min(
+        0.98,
+        round(max(combined[0].score, float(platform.get("confidence", 0.0))) + 0.3, 3),
+    )
+    return KnowledgeAnswer(answer=answer, grounded=True, confidence=confidence, citations=combined, rejected_candidates=rejected)

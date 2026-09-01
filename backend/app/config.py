@@ -8,6 +8,10 @@ from pathlib import Path
 @dataclass(frozen=True)
 class Settings:
     database_path: str = os.getenv("DATABASE_PATH", "data/service-desk.db")
+    platform_data_path: str = os.getenv(
+        "PLATFORM_DATA_PATH",
+        str((Path(__file__).resolve().parents[2] / ".." / "ai-data-platform" / "data").resolve()),
+    )
     model_provider: str = os.getenv("MODEL_PROVIDER", "kimi")
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     openai_base_url: str = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
